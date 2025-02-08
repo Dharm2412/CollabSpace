@@ -6,6 +6,7 @@ import { nanoid } from 'nanoid';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const server = createServer(app);
 const io = new Server(server, {
@@ -18,9 +19,9 @@ const io = new Server(server, {
 });
 
 // Store rooms and their data
-const rooms = new Map();
+const rooms = new Map(); // Format: { roomId: { users: Map, messages: [] } }
 
-// Add these with other room storage
+// Whiteboard storage
 const whiteboards = new Map();
 
 io.on("connection", (socket) => {
@@ -29,10 +30,7 @@ io.on("connection", (socket) => {
   // Create a new room
   socket.on("create_room", (username, callback) => {
     try {
-      // Generate a unique 6-character room ID
       const roomId = nanoid(6).toUpperCase();
-      
-      // Initialize room data
       const room = {
         users: new Map([[socket.id, username]]),
         messages: [{
@@ -43,25 +41,18 @@ io.on("connection", (socket) => {
         }]
       };
       
-      // Store room data
       rooms.set(roomId, room);
-
-      // Join socket to room
       socket.join(roomId);
       socket.data.roomId = roomId;
       socket.data.username = username;
 
-      // Send initial message to the room
       io.to(roomId).emit("receive_message", room.messages[0]);
-
-      // Send room data to creator
       callback({
         success: true,
         roomId,
         messages: room.messages,
         users: Array.from(room.users.values())
       });
-      
       console.log(`${username} created room ${roomId}`);
     } catch (error) {
       console.error("Error creating room:", error);
@@ -73,32 +64,27 @@ io.on("connection", (socket) => {
   socket.on("join_room", ({ roomId, username }, callback) => {
     try {
       const room = rooms.get(roomId.toUpperCase());
-      
       if (!room) {
         callback({ success: false, error: "Room not found" });
         return;
       }
 
-      // Add user to room
       room.users.set(socket.id, username);
       socket.join(roomId);
       socket.data.roomId = roomId;
       socket.data.username = username;
 
-      // Notify others in the room
       io.to(roomId).emit("user_joined", {
         message: `${username} has joined the chat`,
         users: Array.from(room.users.values()),
         timestamp: new Date().toISOString(),
       });
 
-      // Send room data to the joining user
       callback({ 
         success: true,
         messages: room.messages,
         users: Array.from(room.users.values())
       });
-      
       console.log(`${username} joined room ${roomId}`);
     } catch (error) {
       console.error("Error joining room:", error);
@@ -120,10 +106,7 @@ io.on("connection", (socket) => {
           timestamp: new Date().toISOString(),
         };
 
-        // Store message in room history
         room.messages.push(newMessage);
-        
-        // Broadcast to all users in the room
         io.to(roomId).emit("receive_message", newMessage);
         console.log(`Message from ${socket.data.username} in room ${roomId}: ${message}`);
       }
@@ -143,11 +126,9 @@ io.on("connection", (socket) => {
         room.users.delete(socket.id);
         
         if (room.users.size === 0) {
-          // Delete empty rooms
           rooms.delete(roomId);
           console.log(`Room ${roomId} deleted - no users remaining`);
         } else {
-          // Notify remaining users
           io.to(roomId).emit("user_left", {
             message: `${username} has left the chat`,
             users: Array.from(room.users.values()),
@@ -159,7 +140,6 @@ io.on("connection", (socket) => {
     } catch (error) {
       console.error("Error handling disconnection:", error);
     }
-    
     console.log("User disconnected:", socket.id);
   });
 
@@ -189,4 +169,4 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-}); 
+});

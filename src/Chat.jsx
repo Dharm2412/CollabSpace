@@ -1,75 +1,65 @@
-"use client"
-
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import io from 'socket.io-client';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { getAIResponse } from './utils/gemini';
-
-const SOCKET_URL = 'http://localhost:5000';
+import RoomSidebar from './components/RoomSidebar';
+import { toast } from 'react-hot-toast';
 
 function Chat() {
+  const { roomId: urlRoomId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [step, setStep] = useState('join'); // 'join' or 'chat'
+  const [step, setStep] = useState('join');
   const [username, setUsername] = useState('');
-  const [roomId, setRoomId] = useState('');
-  const [socket, setSocket] = useState(null);
+  const [roomId, setRoomId] = useState(urlRoomId || '');
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [users, setUsers] = useState([]);
   const [isAILoading, setIsAILoading] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const roomIdRef = useRef(roomId);
+  const usernameRef = useRef(username);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  useEffect(() => {
-    const newSocket = io(SOCKET_URL);
-    setSocket(newSocket);
-    return () => newSocket.close();
   }, []);
+
+  useEffect(() => {
+    roomIdRef.current = roomId;
+    usernameRef.current = username;
+  }, [roomId, username]);
 
   const handleJoinRoom = (e) => {
     e.preventDefault();
     if (!username.trim()) return;
 
-    if (roomId.trim()) {
-      // Join existing room
-      socket.emit('join_room', { roomId, username }, (response) => {
-        if (response.success) {
-          setMessages(response.messages);
-          setUsers(response.users);
-          setStep('chat');
-        } else {
-          alert(response.error);
-        }
-      });
-    } else {
-      // Create new room
-      socket.emit('create_room', username, (response) => {
-        if (response.success) {
-          setRoomId(response.roomId);
-          setMessages(response.messages);
-          setUsers(response.users);
-          setStep('chat');
-        } else {
-          alert(response.error);
-        }
-      });
-    }
+    const newRoomId = roomId.trim() || Math.random().toString(36).substr(2, 6).toUpperCase();
+    const welcomeMessage = {
+      id: Date.now(),
+      text: `Welcome to room ${newRoomId}! This is a local chat session.`,
+      sender: "system",
+      timestamp: new Date().toISOString(),
+    };
+
+    setRoomId(newRoomId);
+    setMessages([welcomeMessage]);
+    setUsers([username]);
+    setStep('chat');
+    navigate(`/chat/${newRoomId}`);
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (message.trim() && socket) {
-      socket.emit('send_message', message);
+    if (message.trim()) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: message,
+        sender: username,
+        timestamp: new Date().toISOString(),
+      }]);
       setMessage('');
+      scrollToBottom();
     }
   };
 
@@ -77,19 +67,29 @@ function Chat() {
     e.preventDefault();
     if (!message.trim() || isAILoading) return;
 
+    if (/(who('s|s)\s+(your\s+)?(boss|creator|sir)|(boss|sir|creator)\s+name|who\s+(made|created|built|is))/i.test(message)) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: "Dharm Sir (Dharm Patel)",
+        sender: 'ai',
+        timestamp: new Date().toISOString(),
+      }]);
+      setMessage('');
+      return scrollToBottom();
+    }
+
     setIsAILoading(true);
     try {
       const aiResponse = await getAIResponse(message);
-      const aiMessage = {
+      setMessages(prev => [...prev, {
         id: Date.now(),
         text: aiResponse,
         sender: 'ai',
         timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, aiMessage]);
+      }]);
       setMessage('');
+      scrollToBottom();
     } catch (error) {
-      console.error('AI Error:', error);
       setMessages(prev => [...prev, {
         id: Date.now(),
         text: "Sorry, I'm having trouble connecting to AI",
@@ -102,42 +102,18 @@ function Chat() {
   };
 
   useEffect(() => {
-    if (!socket) return;
+    const container = messagesEndRef.current?.parentElement;
+    if (container && container.scrollHeight - container.scrollTop - container.clientHeight < 100) {
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
 
-    socket.on('receive_message', (newMessage) => {
-      setMessages(prev => [...prev, newMessage]);
-    });
-
-    socket.on('user_joined', ({ message, users }) => {
-      setMessages(prev => [...prev, { id: Date.now(), text: message, sender: 'system' }]);
-      setUsers(users);
-    });
-
-    socket.on('user_left', ({ message, users }) => {
-      setMessages(prev => [...prev, { id: Date.now(), text: message, sender: 'system' }]);
-      setUsers(users);
-    });
-
-    return () => {
-      socket.off('receive_message');
-      socket.off('user_joined');
-      socket.off('user_left');
-    };
-  }, [socket]);
-
-  // Add this helper function for timestamp formatting
-  const formatTime = (timestamp) => {
-    return new Date(timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
-
-  // Add this helper function for message length
-  const getMessageLengthIndicator = (text) => {
-    if (text.length < 50) return 'Short';
-    if (text.length < 200) return 'Medium';
-    return 'Long';
+  const handleLeaveRoom = () => {
+    setStep('join');
+    setRoomId('');
+    setUsers([]);
+    setMessages([]);
+    navigate('/chat');
   };
 
   if (step === 'join') {
@@ -181,21 +157,12 @@ function Chat() {
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <div className="w-64 bg-white border-r p-4">
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold">Room: {roomId}</h2>
-          <p className="text-sm text-gray-500">Share this ID to invite others</p>
-        </div>
-        <div>
-          <h3 className="font-medium mb-2">Online Users</h3>
-          <ul className="space-y-1">
-            {users.map((user, index) => (
-              <li key={index} className="text-gray-600">{user}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
+      <RoomSidebar 
+        roomId={roomId} 
+        users={users}
+        onLeave={handleLeaveRoom}
+      />
+      
       <div className="flex-1 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((msg) => (
@@ -204,22 +171,32 @@ function Chat() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className={`max-w-lg ${
-                msg.sender === username 
-                  ? 'ml-auto bg-indigo-600 text-white' 
-                  : msg.sender === 'system'
-                  ? 'mx-auto bg-gray-200 text-gray-600'
-                  : msg.sender === 'ai'
-                  ? 'bg-green-100 text-black border-l-4 border-green-500'
-                  : 'bg-white'
+                msg.sender === username ? 'ml-auto bg-indigo-600 text-white' :
+                msg.sender === 'system' ? 'mx-auto bg-gray-200 text-gray-600' :
+                msg.sender === 'ai' ? 'bg-green-50 text-black border-l-4 border-green-600' :
+                'bg-white'
               } rounded-lg p-3 shadow`}
             >
-              {msg.sender !== 'system' && (
-                <p className="text-xs opacity-75 mb-1">{msg.sender}</p>
-              )}
+              {msg.sender !== 'system' && <p className="text-xs opacity-75 mb-1">{msg.sender}</p>}
               {msg.sender === 'ai' ? (
-                <div>
-                  <h3 className="text-base font-bold mb-1">AI Response:</h3>
-                  <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-bold text-green-800">🤖 AI Response</h3>
+                  <div className="space-y-3">
+                    {msg.text.split(/(```[\s\S]*?```)/g).map((part, index) => part.startsWith('```') ? (
+                      <div key={index} className="relative">
+                        <div className="absolute top-0 right-0 bg-gray-700 text-white text-xs px-2 py-1 rounded-bl-lg">
+                          Code
+                        </div>
+                        <pre className="bg-gray-800 text-gray-100 p-4 rounded-lg overflow-x-auto font-mono text-sm">
+                          {part.replace(/```(\w+)?/g, '').trim()}
+                        </pre>
+                      </div>
+                    ) : (
+                      <p key={index} className="text-base leading-relaxed whitespace-pre-wrap text-gray-800">
+                        {part}
+                      </p>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
