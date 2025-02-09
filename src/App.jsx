@@ -9,6 +9,7 @@ import Features from './pages/Features'
 import Contact from './pages/Contact'
 import { Toaster } from 'react-hot-toast'
 import { SocketProvider } from './context/SocketContext'
+import { createBrowserRouter } from 'react-router-dom'
 
 function App() {
   return (

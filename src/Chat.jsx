@@ -39,26 +39,14 @@ function Chat() {
       scrollToBottom();
     };
 
-    const handleUserJoined = (joinedUsername) => {
-      setUsers(prev => [...prev, joinedUsername]);
-      setMessages(prev => [...prev, {
-        id: Date.now() + Math.random().toString(36).substr(2, 9),
-        text: `${joinedUsername} joined the room`,
-        sender: 'system',
-        timestamp: new Date().toISOString()
-      }]);
-      scrollToBottom();
+    const handleUserJoined = (user) => {
+      setUsers(prev => [...prev, user.username]);
+      toast.success(`${user.username} joined the room`);
     };
 
-    const handleUserLeft = (leftUsername) => {
-      setUsers(prev => prev.filter(user => user !== leftUsername));
-      setMessages(prev => [...prev, {
-        id: Date.now() + Math.random().toString(36).substr(2, 9),
-        text: `${leftUsername} left the room`,
-        sender: 'system',
-        timestamp: new Date().toISOString()
-      }]);
-      scrollToBottom();
+    const handleUserLeft = (user) => {
+      setUsers(prev => prev.filter(u => u !== user.username));
+      toast.error(`${user.username} left the room`);
     };
 
     const handleRoomData = ({ messages: roomMessages, users: roomUsers }) => {
