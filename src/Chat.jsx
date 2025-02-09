@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { getAIResponse } from './utils/gemini';
 import RoomSidebar from './components/RoomSidebar';
 import { toast } from 'react-hot-toast';
+import { useSocket } from './context/SocketContext';
 
 function Chat() {
   const { roomId: urlRoomId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
-  const [step, setStep] = useState('join');
+  const socket = useSocket();
+  const [step, setStep] = useState(urlRoomId ? 'chat' : 'join');
   const [username, setUsername] = useState('');
   const [roomId, setRoomId] = useState(urlRoomId || '');
   const [messages, setMessages] = useState([]);
@@ -18,87 +19,154 @@ function Chat() {
   const [isAILoading, setIsAILoading] = useState(false);
 
   const messagesEndRef = useRef(null);
-  const roomIdRef = useRef(roomId);
   const usernameRef = useRef(username);
+  const roomIdRef = useRef(roomId);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
-    roomIdRef.current = roomId;
     usernameRef.current = username;
-  }, [roomId, username]);
+    roomIdRef.current = roomId;
+  }, [username, roomId]);
+
+  useEffect(() => {
+    if (!socket || !roomId) return;
+
+    const handleReceiveMessage = (newMessage) => {
+      setMessages(prev => [...prev, newMessage]);
+      scrollToBottom();
+    };
+
+    const handleUserJoined = (joinedUsername) => {
+      setUsers(prev => [...prev, joinedUsername]);
+      setMessages(prev => [...prev, {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        text: `${joinedUsername} joined the room`,
+        sender: 'system',
+        timestamp: new Date().toISOString()
+      }]);
+      scrollToBottom();
+    };
+
+    const handleUserLeft = (leftUsername) => {
+      setUsers(prev => prev.filter(user => user !== leftUsername));
+      setMessages(prev => [...prev, {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        text: `${leftUsername} left the room`,
+        sender: 'system',
+        timestamp: new Date().toISOString()
+      }]);
+      scrollToBottom();
+    };
+
+    const handleRoomData = ({ messages: roomMessages, users: roomUsers }) => {
+      setMessages(roomMessages);
+      setUsers(roomUsers);
+      scrollToBottom();
+    };
+
+    socket.on('receive-message', handleReceiveMessage);
+    socket.on('user-joined', handleUserJoined);
+    socket.on('user-left', handleUserLeft);
+    socket.on('room-data', handleRoomData);
+
+    return () => {
+      socket.off('receive-message', handleReceiveMessage);
+      socket.off('user-joined', handleUserJoined);
+      socket.off('user-left', handleUserLeft);
+      socket.off('room-data', handleRoomData);
+    };
+  }, [socket, roomId, scrollToBottom]);
 
   const handleJoinRoom = (e) => {
     e.preventDefault();
-    if (!username.trim()) return;
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      toast.error('Please enter a username');
+      return;
+    }
 
     const newRoomId = roomId.trim() || Math.random().toString(36).substr(2, 6).toUpperCase();
-    const welcomeMessage = {
-      id: Date.now(),
-      text: `Welcome to room ${newRoomId}! This is a local chat session.`,
-      sender: "system",
-      timestamp: new Date().toISOString(),
-    };
+    
+    socket.emit('join-room', { 
+      roomId: newRoomId,
+      username: trimmedUsername
+    });
 
     setRoomId(newRoomId);
-    setMessages([welcomeMessage]);
-    setUsers([username]);
     setStep('chat');
     navigate(`/chat/${newRoomId}`);
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (message.trim()) {
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: message,
-        sender: username,
-        timestamp: new Date().toISOString(),
-      }]);
-      setMessage('');
-      scrollToBottom();
-    }
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) return;
+
+    const newMessage = {
+      text: trimmedMessage,
+      sender: usernameRef.current,
+    };
+
+    socket.emit('send-message', { 
+      roomId: roomIdRef.current,
+      message: newMessage
+    });
+    
+    setMessage('');
   };
 
   const handleAIChat = async (e) => {
     e.preventDefault();
-    if (!message.trim() || isAILoading) return;
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage || isAILoading) return;
 
-    if (/(who('s|s)\s+(your\s+)?(boss|creator|sir)|(boss|sir|creator)\s+name|who\s+(made|created|built|is))/i.test(message)) {
-      setMessages(prev => [...prev, {
-        id: Date.now(),
+    // Special case handling for creator info
+    if (/(who('s|s)\s+(your\s+)?(boss|creator|sir)|(boss|sir|creator)\s+name|who\s+(made|created|built|is))/i.test(trimmedMessage)) {
+      const aiResponse = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
         text: "Dharm Sir (Dharm Patel)",
         sender: 'ai',
         timestamp: new Date().toISOString(),
-      }]);
+      };
+      setMessages(prev => [...prev, aiResponse]);
       setMessage('');
-      return scrollToBottom();
+      scrollToBottom();
+      return;
     }
 
     setIsAILoading(true);
     try {
-      const aiResponse = await getAIResponse(message);
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: aiResponse,
+      const aiText = await getAIResponse(trimmedMessage);
+      const aiResponse = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        text: aiText,
         sender: 'ai',
         timestamp: new Date().toISOString(),
-      }]);
+      };
+      setMessages(prev => [...prev, aiResponse]);
       setMessage('');
       scrollToBottom();
     } catch (error) {
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        text: "Sorry, I'm having trouble connecting to AI",
-        sender: 'system',
-        timestamp: new Date().toISOString()
-      }]);
+      toast.error('Failed to get AI response');
     } finally {
       setIsAILoading(false);
     }
+  };
+
+  const handleLeaveRoom = () => {
+    socket.emit('leave-room', { 
+      roomId: roomIdRef.current,
+      username: usernameRef.current
+    });
+    setStep('join');
+    setRoomId('');
+    setUsername('');
+    setUsers([]);
+    setMessages([]);
+    navigate('/chat');
   };
 
   useEffect(() => {
@@ -107,14 +175,6 @@ function Chat() {
       scrollToBottom();
     }
   }, [messages, scrollToBottom]);
-
-  const handleLeaveRoom = () => {
-    setStep('join');
-    setRoomId('');
-    setUsers([]);
-    setMessages([]);
-    navigate('/chat');
-  };
 
   if (step === 'join') {
     return (
@@ -177,7 +237,10 @@ function Chat() {
                 'bg-white'
               } rounded-lg p-3 shadow`}
             >
-              {msg.sender !== 'system' && <p className="text-xs opacity-75 mb-1">{msg.sender}</p>}
+              {msg.sender !== 'system' && msg.sender !== 'ai' && (
+                <p className="text-xs opacity-75 mb-1">{msg.sender}</p>
+              )}
+              
               {msg.sender === 'ai' ? (
                 <div className="space-y-2">
                   <h3 className="text-lg font-bold text-green-800">🤖 AI Response</h3>
@@ -201,25 +264,30 @@ function Chat() {
               ) : (
                 <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
               )}
+              
+              <p className="text-xs text-gray-500 mt-1">
+                {new Date(msg.timestamp).toLocaleTimeString()}
+              </p>
             </motion.div>
           ))}
           <div ref={messagesEndRef} />
         </div>
 
         <form onSubmit={handleSendMessage} className="p-4 bg-white border-t">
-          <div className="flex space-x-4">
+          <div className="flex gap-4">
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
               placeholder="Type your message..."
+              disabled={isAILoading}
             />
             <button
               type="button"
               onClick={handleAIChat}
               disabled={isAILoading}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400"
+              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
               {isAILoading ? '🤖 Thinking...' : '🤖 Ask AI'}
             </button>

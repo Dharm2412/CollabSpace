@@ -3,20 +3,18 @@ import { io } from 'socket.io-client';
 
 const SocketContext = createContext();
 
-export function SocketProvider({ children }) {
+export const useSocket = () => {
+  return useContext(SocketContext);
+};
+
+export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const newSocket = io(import.meta.env.DEV ? 'http://localhost:5000' : window.location.origin, {
-      withCredentials: true,
-      autoConnect: true
-    });
-    
+    const newSocket = io('http://localhost:3001'); // Update with your server URL
     setSocket(newSocket);
-    
-    return () => {
-      if (newSocket) newSocket.disconnect();
-    };
+
+    return () => newSocket.close();
   }, []);
 
   return (
@@ -24,10 +22,4 @@ export function SocketProvider({ children }) {
       {children}
     </SocketContext.Provider>
   );
-}
-
-export function useSocket() {
-  const socket = useContext(SocketContext);
-  if (!socket) throw new Error('Socket context not found');
-  return socket;
-} 
+};

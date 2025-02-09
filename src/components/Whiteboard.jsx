@@ -17,14 +17,20 @@ export default function Whiteboard() {
       setUsers(userList);
     };
 
-    socket.on('user-joined-whiteboard', handleUserUpdate);
-    socket.on('user-left-whiteboard', handleUserUpdate);
+    socket.on('whiteboard-users', handleUserUpdate);
     
     return () => {
-      socket.off('user-joined-whiteboard', handleUserUpdate);
-      socket.off('user-left-whiteboard', handleUserUpdate);
+      socket.off('whiteboard-users', handleUserUpdate);
     };
   }, [socket]);
+
+  useEffect(() => {
+    socket.emit('join-room', roomId);
+
+    return () => {
+      socket.emit('leave-room', roomId);
+    };
+  }, [socket, roomId]);
 
   return (
     <div className="flex h-screen bg-white">
@@ -43,7 +49,7 @@ function EditorWrapper({ roomId, socket }) {
 
   useEffect(() => {
     const handleChange = (changes) => {
-      socket.emit('draw', { roomId, changes });
+      socket.emit('whiteboard-draw', { roomId, changes });
     };
 
     const cleanup = editor.store.listen(handleChange, {
@@ -58,16 +64,24 @@ function EditorWrapper({ roomId, socket }) {
     const handleRemoteChange = (data) => {
       if (data.roomId === roomId) {
         editor.store.mergeRemoteChanges(() => {
-          const { added, updated, removed } = data.changes;
-          Object.values(added).forEach(record => editor.store.put([record]));
-          Object.values(updated).forEach(([, to]) => editor.store.put([to]));
-          Object.values(removed).forEach(record => editor.store.remove([record.id]));
+          editor.store.applyDiff(data.changes);
         });
       }
     };
 
-    socket.on('draw', handleRemoteChange);
-    return () => socket.off('draw', handleRemoteChange);
+    const handleInitialDrawings = (drawings) => {
+      editor.store.mergeRemoteChanges(() => {
+        drawings.forEach(change => editor.store.applyDiff(change));
+      });
+    };
+
+    socket.on('whiteboard-draw', handleRemoteChange);
+    socket.on('whiteboard-history', handleInitialDrawings);
+    
+    return () => {
+      socket.off('whiteboard-draw', handleRemoteChange);
+      socket.off('whiteboard-history', handleInitialDrawings);
+    };
   }, [socket, roomId, editor]);
 
   useEffect(() => {
@@ -78,4 +92,4 @@ function EditorWrapper({ roomId, socket }) {
   }, [socket, roomId]);
 
   return null;
-} 
+}

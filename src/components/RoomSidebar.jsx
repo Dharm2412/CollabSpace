@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
+import React from 'react';
 
 export default function RoomSidebar({ roomId, users, onLeave }) {
   const navigate = useNavigate();
@@ -41,7 +42,9 @@ export default function RoomSidebar({ roomId, users, onLeave }) {
         <h3 className="font-medium mb-2">Online Users</h3>
         <ul className="space-y-1">
           {users.map((user, index) => (
-            <li key={index} className="text-gray-600 truncate">{user}</li>
+            <li key={index} className="text-gray-600 truncate">
+              {typeof user === 'string' ? user : user.username}
+            </li>
           ))}
         </ul>
       </div>
