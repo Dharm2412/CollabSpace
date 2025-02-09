@@ -29,6 +29,12 @@ export default function RoomSidebar({ roomId, users, onLeave }) {
             💬 Chat
           </button>
           <button
+            onClick={() => handleNavigation(`/code/${roomId}`)}
+            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            💻 Code Share
+          </button>
+          <button
             onClick={() => handleNavigation(`/whiteboard/${roomId}`)}
             className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
           >
@@ -44,6 +50,12 @@ export default function RoomSidebar({ roomId, users, onLeave }) {
             <li key={index} className="text-gray-600 truncate">{user}</li>
           ))}
         </ul>
+        <button
+          onClick={onLeave}
+          className="w-full mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+        >
+          Leave Room
+        </button>
       </div>
     </div>
   );

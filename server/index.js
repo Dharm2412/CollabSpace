@@ -164,6 +164,19 @@ io.on("connection", (socket) => {
   socket.on('clear', (roomId) => {
     socket.to(roomId).emit('clear');
   });
+
+  // Add these handlers to your existing socket.io setup
+  socket.on('join-whiteboard', (roomId) => {
+    socket.join(roomId);
+    const users = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+    io.to(roomId).emit('user-joined-whiteboard', users);
+  });
+
+  socket.on('leave-whiteboard', (roomId) => {
+    socket.leave(roomId);
+    const users = Array.from(io.sockets.adapter.rooms.get(roomId) || []);
+    io.to(roomId).emit('user-left-whiteboard', users);
+  });
 });
 
 const PORT = process.env.PORT || 5000;
