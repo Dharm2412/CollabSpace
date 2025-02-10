@@ -10,9 +10,9 @@ function Chat() {
   const { roomId: urlRoomId } = useParams();
   const navigate = useNavigate();
   const socket = useSocket();
-  const [step, setStep] = useState(urlRoomId ? 'chat' : 'join');
+  const [step, setStep] = useState('join');
   const [username, setUsername] = useState('');
-  const [roomId, setRoomId] = useState(urlRoomId || '');
+  const [roomId, setRoomId] = useState('');
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [users, setUsers] = useState([]);
@@ -68,6 +68,13 @@ function Chat() {
     };
   }, [socket, roomId, scrollToBottom]);
 
+  // Auto-fill room ID from URL parameter
+  useEffect(() => {
+    if (urlRoomId) {
+      setRoomId(urlRoomId);
+    }
+  }, [urlRoomId]);
+
   const handleJoinRoom = (e) => {
     e.preventDefault();
     const trimmedUsername = username.trim();
@@ -76,14 +83,13 @@ function Chat() {
       return;
     }
 
-    const newRoomId = roomId.trim() || Math.random().toString(36).substr(2, 6).toUpperCase();
+    const newRoomId = urlRoomId || roomId.trim() || Math.random().toString(36).substr(2, 6).toUpperCase();
     
     socket.emit('join-room', { 
       roomId: newRoomId,
       username: trimmedUsername
     });
 
-    setRoomId(newRoomId);
     setStep('chat');
     navigate(`/chat/${newRoomId}`);
   };
@@ -182,20 +188,24 @@ function Chat() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Room ID (optional)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {urlRoomId ? 'Room ID' : 'Room ID (optional)'}
+              </label>
               <input
                 type="text"
                 value={roomId}
                 onChange={(e) => setRoomId(e.target.value)}
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                 placeholder="Leave empty to create new room"
+                readOnly={!!urlRoomId}
+                disabled={!!urlRoomId}
               />
             </div>
             <button
               type="submit"
               className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors"
             >
-              {roomId ? 'Join Room' : 'Create Room'}
+              {urlRoomId ? 'Join Room' : 'Create Room'}
             </button>
           </form>
         </div>
