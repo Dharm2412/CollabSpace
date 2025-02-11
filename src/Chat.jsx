@@ -5,18 +5,24 @@ import { getAIResponse } from './utils/gemini';
 import RoomSidebar from './components/RoomSidebar';
 import { toast } from 'react-hot-toast';
 import { useSocket } from './context/SocketContext';
+import { ref, onValue, onDisconnect, set, remove } from 'firebase/database';
+import { rtdb } from './firebase';
+
+// Add localStorage persistence for user session
+const SESSION_KEY = 'chat_session';
 
 function Chat() {
   const { roomId: urlRoomId } = useParams();
   const navigate = useNavigate();
   const socket = useSocket();
   const [step, setStep] = useState('join');
-  const [username, setUsername] = useState('');
-  const [roomId, setRoomId] = useState('');
+  const [username, setUsername] = useState(localStorage.getItem(SESSION_KEY)?.username || '');
+  const [roomId, setRoomId] = useState(localStorage.getItem(SESSION_KEY)?.roomId || '');
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [users, setUsers] = useState([]);
   const [isAILoading, setIsAILoading] = useState(false);
+  const [userId] = useState(localStorage.getItem(SESSION_KEY)?.userId || crypto.randomUUID());
 
   const messagesEndRef = useRef(null);
   const usernameRef = useRef(username);
@@ -80,6 +86,44 @@ function Chat() {
     }
   }, [urlRoomId]);
 
+  // Persist session to localStorage
+  useEffect(() => {
+    if (roomId && username) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        username,
+        roomId,
+        userId,
+        messages
+      }));
+    }
+  }, [roomId, username, userId, messages]);
+
+  useEffect(() => {
+    const chatRef = ref(rtdb, `chats/${roomId}`);
+    const unsubscribe = onValue(chatRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const messagesArray = Object.values(data);
+        setMessages(messagesArray);
+        localStorage.setItem(SESSION_KEY, JSON.stringify({
+          username,
+          roomId,
+          userId,
+          messages: messagesArray
+        }));
+      }
+    });
+
+    // Track user presence
+    const presenceRef = ref(rtdb, `presence/${roomId}/${userId}`);
+    onDisconnect(presenceRef).remove();
+    set(presenceRef, true);
+
+    return () => {
+      unsubscribe();
+    };
+  }, [roomId, userId]);
+
   const handleJoinRoom = (e) => {
     e.preventDefault();
     const trimmedUsername = username.trim();
@@ -97,6 +141,11 @@ function Chat() {
 
     setStep('chat');
     navigate(`/chat/${newRoomId}`);
+    // Load previous messages if rejoining
+    const savedSession = localStorage.getItem(SESSION_KEY);
+    if (savedSession?.roomId === newRoomId) {
+      setMessages(JSON.parse(savedSession).messages || []);
+    }
   };
 
   const handleSendMessage = (e) => {
@@ -160,6 +209,7 @@ function Chat() {
       roomId: roomIdRef.current,
       username: usernameRef.current
     });
+    localStorage.removeItem(SESSION_KEY);
     setStep('join');
     setRoomId('');
     setUsername('');
