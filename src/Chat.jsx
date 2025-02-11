@@ -40,7 +40,12 @@ function Chat() {
     };
 
     const handleUserJoined = (user) => {
-      setUsers(prev => [...prev, user.username]);
+      setUsers(prev => {
+        if (!prev.includes(user.username)) {
+          return [...prev, user.username];
+        }
+        return prev;
+      });
       toast.success(`${user.username} joined the room`);
     };
 
@@ -51,7 +56,7 @@ function Chat() {
 
     const handleRoomData = ({ messages: roomMessages, users: roomUsers }) => {
       setMessages(roomMessages);
-      setUsers(roomUsers);
+      setUsers([...new Set(roomUsers)]);
       scrollToBottom();
     };
 
@@ -223,50 +228,58 @@ function Chat() {
       
       <div className="flex-1 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((msg) => (
-            <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`max-w-lg ${
-                msg.sender === username ? 'ml-auto bg-indigo-600 text-white' :
-                msg.sender === 'system' ? 'mx-auto bg-gray-200 text-gray-600' :
-                msg.sender === 'ai' ? 'bg-green-50 text-black border-l-4 border-green-600' :
-                'bg-white'
-              } rounded-lg p-3 shadow`}
-            >
-              {msg.sender !== 'system' && msg.sender !== 'ai' && (
-                <p className="text-xs opacity-75 mb-1">{msg.sender}</p>
-              )}
-              
-              {msg.sender === 'ai' ? (
-                <div className="space-y-2">
-                  <h3 className="text-lg font-bold text-green-800">🤖 AI Response</h3>
-                  <div className="space-y-3">
-                    {msg.text.split(/(```[\s\S]*?```)/g).map((part, index) => part.startsWith('```') ? (
-                      <div key={index} className="relative">
-                        <div className="absolute top-0 right-0 bg-gray-700 text-white text-xs px-2 py-1 rounded-bl-lg">
-                          Code
+          {messages.map((message, index) => (
+            message.type === 'system' ? (
+              <div key={index} className="text-center">
+                <span className="inline-block px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-full">
+                  {message.content}
+                </span>
+              </div>
+            ) : (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`max-w-lg ${
+                  message.sender === username ? 'ml-auto bg-indigo-600 text-white' :
+                  message.sender === 'system' ? 'mx-auto bg-gray-200 text-gray-600' :
+                  message.sender === 'ai' ? 'bg-green-50 text-black border-l-4 border-green-600' :
+                  'bg-white'
+                } rounded-lg p-3 shadow`}
+              >
+                {message.sender !== 'system' && message.sender !== 'ai' && (
+                  <p className="text-xs opacity-75 mb-1">{message.sender}</p>
+                )}
+                
+                {message.sender === 'ai' ? (
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-bold text-green-800">🤖 AI Response</h3>
+                    <div className="space-y-3">
+                      {message.text.split(/(```[\s\S]*?```)/g).map((part, index) => part.startsWith('```') ? (
+                        <div key={index} className="relative">
+                          <div className="absolute top-0 right-0 bg-gray-700 text-white text-xs px-2 py-1 rounded-bl-lg">
+                            Code
+                          </div>
+                          <pre className="bg-gray-800 text-gray-100 p-4 rounded-lg overflow-x-auto font-mono text-sm">
+                            {part.replace(/```(\w+)?/g, '').trim()}
+                          </pre>
                         </div>
-                        <pre className="bg-gray-800 text-gray-100 p-4 rounded-lg overflow-x-auto font-mono text-sm">
-                          {part.replace(/```(\w+)?/g, '').trim()}
-                        </pre>
-                      </div>
-                    ) : (
-                      <p key={index} className="text-base leading-relaxed whitespace-pre-wrap text-gray-800">
-                        {part}
-                      </p>
-                    ))}
+                      ) : (
+                        <p key={index} className="text-base leading-relaxed whitespace-pre-wrap text-gray-800">
+                          {part}
+                        </p>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-              )}
-              
-              <p className="text-xs text-gray-500 mt-1">
-                {new Date(msg.timestamp).toLocaleTimeString()}
-              </p>
-            </motion.div>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                )}
+                
+                <p className="text-xs text-gray-500 mt-1">
+                  {new Date(message.timestamp).toLocaleTimeString()}
+                </p>
+              </motion.div>
+            )
           ))}
           <div ref={messagesEndRef} />
         </div>

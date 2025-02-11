@@ -12,7 +12,7 @@ export default function RoomSidebar({ roomId, users, onLeave }) {
       }
     });
   };
-
+ 
   return (
     <div className="w-64 bg-white border-r p-4 flex flex-col">
       <div className="mb-4">
