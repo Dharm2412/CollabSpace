@@ -1,29 +1,29 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache } from "firebase/firestore";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 import { getPerformance } from "firebase/performance";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcK1PxcfeHcjYSRYZBcoeJjcpUTSE9IFY",
   authDomain: "collabspace-95883.firebaseapp.com",
   databaseURL: "https://collabspace-95883-default-rtdb.firebaseio.com",
   projectId: "collabspace-95883",
-  storageBucket: "collabspace-95883.firebasestorage.app",
+  storageBucket: "collabspace-95883.appspot.com",
   messagingSenderId: "75552492225",
   appId: "1:75552492225:web:54f38ffb7e4ef28b0ee240"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache()
+});
 export const rtdb = getDatabase(app);
 export const storage = getStorage(app);
-
-// Enable offline persistence for Firestore
-enableIndexedDbPersistence(db).catch((err) => {
-  console.error("Firestore offline persistence failed:", err);
-});
 
 // Initialize performance monitoring
 if (typeof window !== 'undefined') {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Tldraw, useEditor } from 'tldraw';
 import { useParams } from 'react-router-dom';
-import { useSocket } from '../context/SocketContext';
 import 'tldraw/tldraw.css';
 import RoomSidebar from './RoomSidebar';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
@@ -9,31 +8,8 @@ import { db } from '../firebase';
 
 export default function Whiteboard() {
   const { roomId } = useParams();
-  const socket = useSocket();
   const [users, setUsers] = useState([]);
   const [whiteboardData, setWhiteboardData] = useState(null);
-
-  useEffect(() => {
-    if (!socket) return;
-
-    const handleUserUpdate = (userList) => {
-      setUsers(userList);
-    };
-
-    socket.on('whiteboard-users', handleUserUpdate);
-    
-    return () => {
-      socket.off('whiteboard-users', handleUserUpdate);
-    };
-  }, [socket]);
-
-  useEffect(() => {
-    socket.emit('join-room', roomId);
-
-    return () => {
-      socket.emit('leave-room', roomId);
-    };
-  }, [socket, roomId]);
 
   // Use Firestore with throttled updates
   const updateWhiteboard = useThrottle((data) => {
@@ -57,19 +33,19 @@ export default function Whiteboard() {
       <RoomSidebar roomId={roomId} users={users} />
       <div className="flex-1 bg-white">
         <Tldraw inferDarkMode={false} persistenceKey={roomId}>
-          <EditorWrapper roomId={roomId} socket={socket} />
+          <EditorWrapper roomId={roomId} />
         </Tldraw>
       </div>
     </div>
   );
 }
 
-function EditorWrapper({ roomId, socket }) {
+function EditorWrapper({ roomId }) {
   const editor = useEditor();
 
   useEffect(() => {
     const handleChange = (changes) => {
-      socket.emit('whiteboard-draw', { roomId, changes });
+      // socket.emit('whiteboard-draw', { roomId, changes });
     };
 
     const cleanup = editor.store.listen(handleChange, {
@@ -78,7 +54,7 @@ function EditorWrapper({ roomId, socket }) {
     });
     
     return () => cleanup();
-  }, [socket, roomId, editor]);
+  }, [roomId, editor]);
 
   useEffect(() => {
     const handleRemoteChange = (data) => {
@@ -95,21 +71,21 @@ function EditorWrapper({ roomId, socket }) {
       });
     };
 
-    socket.on('whiteboard-draw', handleRemoteChange);
-    socket.on('whiteboard-history', handleInitialDrawings);
+    // socket.on('whiteboard-draw', handleRemoteChange);
+    // socket.on('whiteboard-history', handleInitialDrawings);
     
     return () => {
-      socket.off('whiteboard-draw', handleRemoteChange);
-      socket.off('whiteboard-history', handleInitialDrawings);
+      // socket.off('whiteboard-draw', handleRemoteChange);
+      // socket.off('whiteboard-history', handleInitialDrawings);
     };
-  }, [socket, roomId, editor]);
+  }, [roomId, editor]);
 
   useEffect(() => {
-    socket.emit('join-whiteboard', roomId);
+    // socket.emit('join-whiteboard', roomId);
     return () => {
-      socket.emit('leave-whiteboard', roomId);
+      // socket.emit('leave-whiteboard', roomId);
     };
-  }, [socket, roomId]);
+  }, [roomId]);
 
   return null;
 }
