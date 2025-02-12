@@ -16,6 +16,7 @@ import Navbar from './Navbar'
 import Signup from './pages/Signup'
 import { auth } from './firebase'
 
+
 const MainLayout = () => (
   <>
     <Navbar />
@@ -41,43 +42,39 @@ function App() {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (user) {
-        // Remove or modify this redirect if needed
+        // Add any needed user state handling
       }
     });
     return unsubscribe;
   }, [navigate]);
 
   return (
-    <AuthProvider>
-      <SocketProvider>
-        <div>
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 3000,
-              style: {
-                borderRadius: '8px',
-                background: '#333',
-                color: '#fff',
-              },
-            }}
-          />
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route element={<MainLayout />}>
-              <Route path="/features" element={<Features />} />
-              <Route path="/pricing" element={<Pricing />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/contact" element={<Contact />} />
-            </Route>
-            <Route path="/chat/:roomId?" element={<Chat />} />
-            <Route path="/whiteboard/:roomId?" element={<Whiteboard />} />
-          </Routes>
-        </div>
-      </SocketProvider>
-    </AuthProvider>
+    <div>
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            borderRadius: '8px',
+            background: '#333',
+            color: '#fff',
+          },
+        }}
+      />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route element={<MainLayout />}>
+          <Route path="/features" element={<Features />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+        </Route>
+        <Route path="/chat/:roomId?" element={<Chat />} />
+        <Route path="/whiteboard/:roomId?" element={<Whiteboard />} />
+      </Routes>
+    </div>
   );
 }
 

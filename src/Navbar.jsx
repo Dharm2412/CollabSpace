@@ -29,7 +29,7 @@ function Navbar() {
               About
             </Link>
             <Link to="/contact" className="text-gray-700 hover:text-indigo-600 transition-colors">
-              Contact
+              Contact 
             </Link>
           </div>
 

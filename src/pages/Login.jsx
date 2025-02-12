@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithPopup, signInWithEmailAndPassword, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithPopup } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { auth, googleProvider } from '../firebase';
+import { toast } from 'react-hot-toast';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -15,6 +16,7 @@ export default function Login() {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result?.user) {
+        toast.success('Login successful!');
         navigate('/');
       }
     } catch (err) {
@@ -22,8 +24,6 @@ export default function Login() {
       let errorMessage = 'Failed to sign in with Google. Please try again.';
       if (err.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-in canceled by user.';
-      } else if (err.code === 'auth/network-request-failed') {
-        errorMessage = 'Network error. Please check your internet connection.';
       }
       setError(errorMessage);
     }
@@ -33,6 +33,7 @@ export default function Login() {
     e.preventDefault();
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      toast.success('Login successful!');
       navigate('/');
     } catch (err) {
       setError('Invalid credentials');

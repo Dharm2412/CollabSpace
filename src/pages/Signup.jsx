@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth, googleProvider } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-hot-toast';
 
 export default function Signup() {
   const [email, setEmail] = useState('');
@@ -17,6 +18,7 @@ export default function Signup() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(userCredential.user, { displayName: username });
+      toast.success('Account created successfully!');
       navigate('/');
     } catch (err) {
       setError(err.message.replace('Firebase: ', ''));
@@ -27,6 +29,7 @@ export default function Signup() {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result?.user) {
+        toast.success('Account created successfully!');
         navigate('/');
       }
     } catch (err) {
@@ -34,8 +37,6 @@ export default function Signup() {
       let errorMessage = 'Failed to sign up with Google. Please try again.';
       if (err.code === 'auth/popup-closed-by-user') {
         errorMessage = 'Sign-up canceled by user.';
-      } else if (err.code === 'auth/network-request-failed') {
-        errorMessage = 'Network error. Please check your internet connection.';
       }
       setError(errorMessage);
     }
