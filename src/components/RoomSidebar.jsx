@@ -35,6 +35,12 @@ export default function RoomSidebar({ roomId, users, onLeave }) {
           >
             🎨 Whiteboard
           </button>
+          <button
+            onClick={() => handleNavigation(`/code/${roomId}`)}
+            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            💻 Code Share
+          </button>
         </div>
       </div>
 

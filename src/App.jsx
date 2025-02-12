@@ -15,6 +15,7 @@ import { AuthProvider } from './context/AuthContext'
 import Navbar from './Navbar'
 import Signup from './pages/Signup'
 import { auth } from './firebase'
+import CodeShare from './components/CodeShare'
 
 
 const MainLayout = () => (
@@ -73,6 +74,7 @@ function App() {
         </Route>
         <Route path="/chat/:roomId?" element={<Chat />} />
         <Route path="/whiteboard/:roomId?" element={<Whiteboard />} />
+        <Route path="/code/:roomId?" element={<CodeShare />} />
       </Routes>
     </div>
   );
