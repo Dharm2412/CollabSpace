@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { auth, googleProvider } from '../firebase';
 import { toast } from 'react-hot-toast';
@@ -16,7 +16,10 @@ export default function Login() {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result?.user) {
+        const username = result.user.displayName || result.user.email;
+        localStorage.setItem('username', username);
         toast.success('Login successful!');
+        console.log('Navigating to home...');
         navigate('/');
       }
     } catch (err) {
@@ -32,10 +35,13 @@ export default function Login() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const username = userCredential.user.displayName || email;
+      localStorage.setItem('username', username);
       toast.success('Login successful!');
       navigate('/');
     } catch (err) {
+      console.error(err);
       setError('Invalid credentials');
     }
   };

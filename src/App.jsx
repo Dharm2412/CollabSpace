@@ -16,6 +16,7 @@ import Navbar from './Navbar'
 import Signup from './pages/Signup'
 import { auth } from './firebase'
 import CodeShare from './components/CodeShare'
+import { browserSessionPersistence, setPersistence, inMemoryPersistence } from 'firebase/auth'
 
 
 const MainLayout = () => (
@@ -41,9 +42,15 @@ function App() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Set persistence once when app initializes
+    setPersistence(auth, inMemoryPersistence)
+      .catch((error) => {
+        console.error("Auth persistence error:", error);
+      });
+
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (user) {
-        // Add any needed user state handling
+        // Handle any post-login logic here if needed
       }
     });
     return unsubscribe;

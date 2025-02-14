@@ -16,7 +16,7 @@ function Chat() {
   const navigate = useNavigate();
   const socket = useSocket();
   const [step, setStep] = useState('join');
-  const [username, setUsername] = useState(localStorage.getItem(SESSION_KEY)?.username || '');
+  const [username, setUsername] = useState(localStorage.getItem('username') || '');
   const [roomId, setRoomId] = useState(localStorage.getItem(SESSION_KEY)?.roomId || '');
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
@@ -48,6 +48,12 @@ function Chat() {
     const handleUserJoined = (user) => {
       setUsers(prev => {
         if (!prev.includes(user.username)) {
+          setMessages(prevMessages => [...prevMessages, {
+            id: Date.now() + Math.random().toString(36).substr(2, 9),
+            type: 'system',
+            content: `${user.username} joined the room`,
+            timestamp: new Date().toISOString()
+          }]);
           return [...prev, user.username];
         }
         return prev;
@@ -57,6 +63,12 @@ function Chat() {
 
     const handleUserLeft = (user) => {
       setUsers(prev => prev.filter(u => u !== user.username));
+      setMessages(prevMessages => [...prevMessages, {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        type: 'system',
+        content: `${user.username} left the room`,
+        timestamp: new Date().toISOString()
+      }]);
       toast.error(`${user.username} left the room`);
     };
 
@@ -138,6 +150,16 @@ function Chat() {
       roomId: newRoomId,
       username: trimmedUsername
     });
+
+    // Add room creation message
+    if (!urlRoomId && !roomId) {
+      setMessages(prev => [...prev, {
+        id: 'room-created',
+        type: 'system',
+        content: `Room ${newRoomId} created!`,
+        timestamp: new Date().toISOString()
+      }]);
+    }
 
     setStep('chat');
     navigate(`/chat/${newRoomId}`);
@@ -278,59 +300,82 @@ function Chat() {
       
       <div className="flex-1 flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message, index) => (
-            message.type === 'system' ? (
-              <div key={index} className="text-center">
-                <span className="inline-block px-4 py-2 text-sm text-gray-500 bg-gray-100 rounded-full">
-                  {message.content}
-                </span>
-              </div>
-            ) : (
+          {messages.map((message, index) => {
+            if (message.type === 'system') {
+              const isJoinMessage = message.content.includes('joined');
+              const isLeaveMessage = message.content.includes('left');
+              const isRoomCreated = message.content.includes('created');
+
+              return (
+                <div key={message.id} className="text-center my-3 animate-fade-in-up">
+                  <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm shadow-sm ${
+                    isJoinMessage ? 'bg-green-50 border border-green-200 text-green-700' :
+                    isLeaveMessage ? 'bg-red-50 border border-red-200 text-red-700' :
+                    isRoomCreated ? 'bg-blue-50 border border-blue-200 text-blue-700' :
+                    'bg-gray-50 border border-gray-200 text-gray-600'
+                  }`}>
+                    <div className="flex items-center space-x-2">
+                      {isJoinMessage && (
+                        <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 1.414L10.586 9H7a1 1 0 100 2h3.586l-1.293 1.293a1 1 0 101.414 1.414l3-3a1 1 0 000-1.414z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                      {isLeaveMessage && (
+                        <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                      {isRoomCreated && (
+                        <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 11H5a1 1 0 110-2h2.586l-1.293-1.293a1 1 0 010-1.414z" />
+                        </svg>
+                      )}
+                      <span className="font-medium">{message.content}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            
+            return (
               <motion.div
                 key={message.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`max-w-lg ${
-                  message.sender === username ? 'ml-auto bg-indigo-600 text-white' :
-                  message.sender === 'system' ? 'mx-auto bg-gray-200 text-gray-600' :
-                  message.sender === 'ai' ? 'bg-green-50 text-black border-l-4 border-green-600' :
-                  'bg-white'
-                } rounded-lg p-3 shadow`}
+                className={`max-w-lg relative group ${
+                  message.sender === username ? 'ml-auto' : 'mr-auto'
+                }`}
               >
-                {message.sender !== 'system' && message.sender !== 'ai' && (
-                  <p className="text-xs opacity-75 mb-1">{message.sender}</p>
-                )}
-                
-                {message.sender === 'ai' ? (
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-bold text-green-800">🤖 AI Response</h3>
-                    <div className="space-y-3">
-                      {message.text.split(/(```[\s\S]*?```)/g).map((part, index) => part.startsWith('```') ? (
-                        <div key={index} className="relative">
-                          <div className="absolute top-0 right-0 bg-gray-700 text-white text-xs px-2 py-1 rounded-bl-lg">
-                            Code
-                          </div>
-                          <pre className="bg-gray-800 text-gray-100 p-4 rounded-lg overflow-x-auto font-mono text-sm">
-                            {part.replace(/```(\w+)?/g, '').trim()}
-                          </pre>
-                        </div>
-                      ) : (
-                        <p key={index} className="text-base leading-relaxed whitespace-pre-wrap text-gray-800">
-                          {part}
-                        </p>
-                      ))}
+                <div className={`p-3 rounded-2xl shadow-sm ${
+                  message.sender === username ? 
+                  'bg-indigo-600 text-white rounded-br-none' :
+                  'bg-white border border-gray-200 rounded-bl-none'
+                }`}>
+                  {message.sender !== username && (
+                    <div className="flex items-center space-x-2 mb-2">
+                      <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center">
+                        <span className="text-xs font-medium text-gray-500">
+                          {message.sender[0].toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-gray-600">
+                        {message.sender}
+                      </span>
                     </div>
-                  </div>
-                ) : (
+                  )}
                   <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-                )}
-                
-                <p className="text-xs text-gray-500 mt-1">
-                  {new Date(message.timestamp).toLocaleTimeString()}
-                </p>
+                  <p className={`text-xs mt-1 ${
+                    message.sender === username ? 'text-indigo-100' : 'text-gray-500'
+                  }`}>
+                    {new Date(message.timestamp).toLocaleTimeString([], { 
+                      hour: 'numeric', 
+                      minute: '2-digit' 
+                    })}
+                  </p>
+                </div>
               </motion.div>
-            )
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
