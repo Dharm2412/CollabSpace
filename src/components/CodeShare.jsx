@@ -73,17 +73,20 @@ export default function CodeShare() {
         body: JSON.stringify({
           contents: [{
             parts: [{
-              text: `As a senior developer, generate code for: ${aiPrompt}. Respond only with the code, no explanations.`
+              text: `As a senior developer, generate clean code without any comments for: ${aiPrompt}. Return only the functional code.`
             }]
           }]
         })
       });
 
       const data = await response.json();
-      const generatedCode = data.candidates[0].content.parts[0].text;
+      let generatedCode = data.candidates[0].content.parts[0].text;
+      
+      // Remove any remaining comments that might be in the response
+      generatedCode = generatedCode.replace(/\/\*[\s\S]*?\*\/|<!--.*?-->|#.*|\/\/.*/g, '');
+      
       setCode(generatedCode);
       
-      // Broadcast AI-generated code to all room participants
       if (socket) {
         socket.emit('code_update', { roomId, code: generatedCode });
       }
