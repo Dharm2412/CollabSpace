@@ -11,8 +11,12 @@ const io = new Server(server, {
   }
 });
 
-// Add room storage
-const rooms = new Map(); // roomId -> { messages: [], users: Set<string> }
+// Updated room structure to include code content
+const rooms = new Map(); // roomId -> { 
+  // messages: [], 
+  // users: Set<string>, 
+  // code: string 
+// }
 
 const PORT = process.env.PORT || 3001;
 
@@ -30,7 +34,8 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         messages: [],
-        users: new Set()
+        users: new Set(),
+        code: '// Start coding here!\n'
       });
     }
     
@@ -41,10 +46,11 @@ io.on('connection', (socket) => {
     socket.data.rooms.add(roomId);
     socket.join(roomId);
 
-    // Send existing messages and users to joining client
+    // Send existing room data including code
     socket.emit('room-data', {
       messages: room.messages,
-      users: Array.from(room.users)
+      users: Array.from(room.users),
+      code: room.code
     });
 
     // Notify others in the room
@@ -74,6 +80,15 @@ io.on('connection', (socket) => {
   socket.on('whiteboard-draw', (data) => {
     const { roomId, changes } = data;
     socket.to(roomId).emit('whiteboard-draw', { roomId, changes });
+  });
+
+  // Add code update handler
+  socket.on('code_update', ({ roomId, code }) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.code = code;
+      socket.to(roomId).emit('code_update', code);
+    }
   });
 
   socket.on('disconnect', () => {
