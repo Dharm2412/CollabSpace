@@ -1,10 +1,20 @@
 // src/Navbar.jsx
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 
 function Navbar() {
   const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
 
   return (
     <nav className="bg-white shadow-md fixed w-full z-10">
@@ -48,7 +58,7 @@ function Navbar() {
                   {currentUser.displayName || currentUser.email}
                 </span>
                 <button
-                  onClick={logout}
+                  onClick={handleLogout}
                   className="bg-red-100 text-red-600 px-4 py-2 rounded-full hover:bg-red-200 transition-colors flex items-center"
                 >
                   <svg 
