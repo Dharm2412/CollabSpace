@@ -11,24 +11,30 @@ import { rtdb } from "./firebase";
 // Add localStorage persistence for user session
 const SESSION_KEY = "chat_session";
 
-// Enhanced Markdown-like parser for AI response
+// Enhanced Markdown-like parser for AI response with increased text sizes
 const parseAIResponse = (text) => {
   const lines = text.split("\n");
   let inCodeBlock = false;
   let codeContent = [];
-
+  let listCounter = 0;
   const elements = [];
+
   lines.forEach((line, index) => {
     if (line.trim().startsWith("```")) {
       if (inCodeBlock) {
         // End code block
         elements.push(
-          <pre
+          <div
             key={`code-${index}`}
-            className="bg-gray-900 text-gray-100 p-4 rounded-lg my-3 border border-gray-700 shadow-md overflow-x-auto text-sm font-mono leading-relaxed"
+            className="my-4 border-l-4 border-teal-500 bg-gray-800 rounded-r-lg shadow-lg"
           >
-            <code>{codeContent.join("\n")}</code>
-          </pre>
+            <div className="bg-teal-600 text-white px-3 py-1 text-base font-mono rounded-tr-lg">
+              Code
+            </div>
+            <pre className="p-4 text-gray-200 text-base font-mono overflow-x-auto">
+              <code>{codeContent.join("\n")}</code>
+            </pre>
+          </div>
         );
         codeContent = [];
         inCodeBlock = false;
@@ -38,43 +44,98 @@ const parseAIResponse = (text) => {
       }
     } else if (inCodeBlock) {
       codeContent.push(line);
-    } else if (line.trim().startsWith("#")) {
+    } else if (line.trim().startsWith("# ")) {
+      // Level 1 heading - increased to 2xl
+      elements.push(
+        <h2
+          key={`heading-${index}`}
+          className="text-2xl text-teal-700 font-semibold mt-6 mb-2 border-b-2 border-teal-200 pb-1"
+        >
+          {line.replace(/^#\s*/, "")}
+        </h2>
+      );
+    } else if (line.trim().startsWith("## ")) {
+      // Level 2 heading - increased to xl
       elements.push(
         <h3
           key={`heading-${index}`}
-          className="text-2xl font-extrabold text-teal-800 mt-4 mb-2 tracking-tight"
+          className="text-xl text-teal-600 font-semibold mt-4 mb-2 border-b border-teal-200 pb-1"
         >
-          {line.replace(/^#+\s*/, "")}
+          {line.replace(/^##\s*/, "")}
         </h3>
       );
+    } else if (line.trim().startsWith("### ")) {
+      // Level 3 heading - increased to lg
+      elements.push(
+        <h4
+          key={`heading-${index}`}
+          className="text-lg text-teal-500 font-semibold mt-3 mb-1"
+        >
+          {line.replace(/^###\s*/, "")}
+        </h4>
+      );
+    } else if (line.trim().startsWith("* ") || line.trim().startsWith("- ")) {
+      // Numbered list item - increased to lg
+      listCounter++;
+      elements.push(
+        <div
+          key={`list-${index}`}
+          className="flex items-start text-teal-900 my-1 ml-4"
+        >
+          <span className="mr-2 text-teal-600 font-medium text-lg">
+            {listCounter}.
+          </span>
+          <span className="text-lg leading-relaxed">
+            {line.replace(/^[*|-]\s*/, "")}
+          </span>
+        </div>
+      );
+    } else if (line.trim().startsWith("**") && line.trim().endsWith("**")) {
+      // Italic text - increased to lg
+      elements.push(
+        <p
+          key={`italic-${index}`}
+          className="text-lg italic text-teal-800 leading-relaxed my-2"
+        >
+          {line.replace(/\*\*/g, "")}
+        </p>
+      );
     } else if (line.trim()) {
+      // Paragraph - increased to lg
       elements.push(
         <p
           key={`para-${index}`}
-          className="text-base text-teal-900 leading-relaxed my-2"
+          className="text-lg text-teal-900 leading-relaxed my-2"
         >
           {line}
         </p>
       );
+    } else {
+      listCounter = 0; // Reset list counter on empty line
     }
   });
 
   // Handle unclosed code block
   if (inCodeBlock && codeContent.length > 0) {
     elements.push(
-      <pre
+      <div
         key={`code-end`}
-        className="bg-gray-900 text-gray-100 p-4 rounded-lg my-3 border border-gray-700 shadow-md overflow-x-auto text-sm font-mono leading-relaxed"
+        className="my-4 border-l-4 border-teal-500 bg-gray-800 rounded-r-lg shadow-lg"
       >
-        <code>{codeContent.join("\n")}</code>
-      </pre>
+        <div className="bg-teal-600 text-white px-3 py-1 text-base font-mono rounded-tr-lg">
+          Code
+        </div>
+        <pre className="p-4 text-gray-200 text-base font-mono overflow-x-auto">
+          <code>{codeContent.join("\n")}</code>
+        </pre>
+      </div>
     );
   }
 
   return elements.length > 0 ? (
-    elements
+    <div className="space-y-1">{elements}</div>
   ) : (
-    <p className="text-base text-teal-900 leading-relaxed">{text}</p>
+    <p className="text-lg text-teal-900 leading-relaxed">{text}</p>
   );
 };
 
@@ -497,7 +558,7 @@ function Chat() {
                       </span>
                     </div>
                   )}
-                  <div className={isAI ? "space-y-3" : ""}>
+                  <div className={isAI ? "space-y-2" : ""}>
                     {isAI ? (
                       parseAIResponse(message.text)
                     ) : (
