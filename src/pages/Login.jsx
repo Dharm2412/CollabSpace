@@ -1,32 +1,37 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
-import { useAuth } from '../context/AuthContext';
-import { auth, googleProvider } from '../firebase';
-import { toast } from 'react-hot-toast';
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { useAuth } from "../context/AuthContext";
+import { auth, googleProvider } from "../firebase";
+import { toast } from "react-hot-toast";
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
+  const { currentUser, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && currentUser) {
+      console.log(
+        "Login: User detected, letting AuthContext handle redirect...",
+        currentUser.email
+      );
+    }
+  }, [currentUser, loading]);
 
   const handleGoogleLogin = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      if (result?.user) {
-        const username = result.user.displayName || result.user.email;
-        localStorage.setItem('username', username);
-        toast.success('Login successful!');
-        console.log('Navigating to home...');
-        navigate('/');
-      }
+      const username = result.user.displayName || result.user.email;
+      localStorage.setItem("username", username);
+      toast.success("Login successful!");
     } catch (err) {
-      console.error('Google signin error:', err);
-      let errorMessage = 'Failed to sign in with Google. Please try again.';
-      if (err.code === 'auth/popup-closed-by-user') {
-        errorMessage = 'Sign-in canceled by user.';
+      console.error("Google signin error:", err);
+      let errorMessage = "Failed to sign in with Google. Please try again.";
+      if (err.code === "auth/popup-closed-by-user") {
+        errorMessage = "Sign-in canceled by user.";
       }
       setError(errorMessage);
     }
@@ -35,23 +40,32 @@ export default function Login() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
       const username = userCredential.user.displayName || email;
-      localStorage.setItem('username', username);
-      toast.success('Login successful!');
-      navigate('/');
+      localStorage.setItem("username", username);
+      toast.success("Login successful!");
     } catch (err) {
-      console.error(err);
-      setError('Invalid credentials');
+      console.error("Email login error:", err);
+      setError("Invalid credentials");
     }
   };
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900 flex justify-center">
       <div className="max-w-screen-xl m-0 sm:m-10 bg-white shadow sm:rounded-lg flex justify-center flex-1">
         <div className="lg:w-1/2 xl:w-5/12 p-6 sm:p-12">
           <div className="mt-12 flex flex-col items-center">
-            <h1 className="text-2xl xl:text-3xl font-extrabold">Welcome Back</h1>
+            <h1 className="text-2xl xl:text-3xl font-extrabold">
+              Welcome Back
+            </h1>
             {error && (
               <div className="w-full max-w-xs mt-4 p-2 bg-red-100 text-red-700 rounded-lg text-sm">
                 {error}

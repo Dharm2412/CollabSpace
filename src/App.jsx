@@ -1,23 +1,26 @@
-import React, { useEffect } from 'react'
-import { BrowserRouter as Router, Route, Routes, useNavigate, Outlet, Navigate } from 'react-router-dom'
-import Home from './Home'
-import Chat from './Chat'
-import Whiteboard from './components/Whiteboard'
-import Pricing from './pages/Pricing'
-import About from './pages/About'
-import Features from './pages/Features'
-import Contact from './pages/Contact'
-import { Toaster } from 'react-hot-toast'
-import { SocketProvider } from './context/SocketContext'
-import { createBrowserRouter } from 'react-router-dom'
-import Login from './pages/Login'
-import { AuthProvider } from './context/AuthContext'
-import Navbar from './Navbar'
-import Signup from './pages/Signup'
-import { auth } from './firebase'
-import CodeShare from './components/CodeShare'
-import { browserSessionPersistence, setPersistence, inMemoryPersistence } from 'firebase/auth'
-
+import React from "react";
+import {
+  BrowserRouter as Router,
+  Route,
+  Routes,
+  Outlet,
+} from "react-router-dom";
+import Home from "./Home";
+import Chat from "./Chat";
+import Whiteboard from "./components/Whiteboard";
+import Pricing from "./pages/Pricing";
+import About from "./pages/About";
+import Features from "./pages/Features";
+import Contact from "./pages/Contact";
+import { Toaster } from "react-hot-toast";
+import { SocketProvider } from "./context/SocketContext";
+import Login from "./pages/Login";
+import { AuthProvider } from "./context/AuthContext";
+import Navbar from "./Navbar";
+import Signup from "./pages/Signup";
+import CodeShare from "./components/CodeShare";
+import { browserSessionPersistence, setPersistence } from "firebase/auth";
+import { auth } from "./firebase";
 
 const MainLayout = () => (
   <>
@@ -39,22 +42,9 @@ function AppWrapper() {
 }
 
 function App() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Set persistence once when app initializes
-    setPersistence(auth, inMemoryPersistence)
-      .catch((error) => {
-        console.error("Auth persistence error:", error);
-      });
-
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      if (user) {
-        // Handle any post-login logic here if needed
-      }
-    });
-    return unsubscribe;
-  }, [navigate]);
+  setPersistence(auth, browserSessionPersistence).catch((error) => {
+    console.error("Auth persistence error:", error);
+  });
 
   return (
     <div>
@@ -63,9 +53,9 @@ function App() {
         toastOptions={{
           duration: 3000,
           style: {
-            borderRadius: '8px',
-            background: '#333',
-            color: '#fff',
+            borderRadius: "8px",
+            background: "#333",
+            color: "#fff",
           },
         }}
       />

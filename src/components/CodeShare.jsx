@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import RoomSidebar from './RoomSidebar';
 import { useParams } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
@@ -17,57 +17,43 @@ export default function CodeShare() {
   const [expandedFolders, setExpandedFolders] = useState(new Set());
 
   useEffect(() => {
-    // Connect to Socket.io server
-    const newSocket = io('http://localhost:3001'); // Update with your server URL
+    const newSocket = io('http://localhost:3001');
     setSocket(newSocket);
 
-    // Corrected event name to match server (hyphen instead of underscore)
-    newSocket.emit('join-room', { 
-      roomId, 
-      username: 'Anonymous' // Replace with actual username
-    });
-
-    // Reset files when joining new room
-    newSocket.on('room-data', ({ users }) => {
-      setFiles({ 'main.js': '// Start coding here...' }); // Reset to initial state
+    const handleRoomData = ({ users }) => {
       setUsers(users);
+    };
+
+    const handleCodeUpdate = debounce((newCode) => {
+      setFiles(prev => prev !== newCode ? newCode : prev);
+    }, 50);
+
+    newSocket.on('connect', () => {
+      newSocket.emit('join-room', { roomId, username: 'Anonymous' });
     });
 
-    // Add debounced code update handler
-    let debounceTimer;
-    newSocket.on('code_update', (newCode) => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        setFiles(prev => {
-          if (prev !== newCode) return newCode;
-          return prev;
-        });
-      }, 50); // Match debounce time with emit
-    });
+    newSocket.on('room-data', handleRoomData);
+    newSocket.on('code_update', handleCodeUpdate);
+    newSocket.on('user_list', setUsers);
 
-    // Update user list
-    newSocket.on('user_list', (updatedUsers) => {
-      setUsers(updatedUsers);
-    });
-
-    // Cleanup on unmount
     return () => {
+      newSocket.off('room-data', handleRoomData);
+      newSocket.off('code_update', handleCodeUpdate);
+      newSocket.off('user_list', setUsers);
       newSocket.disconnect();
     };
   }, [roomId]);
 
-  // Add proper debounce for emitting changes
   const handleEditorChange = useCallback(
     debounce((value) => {
       if (socket && value !== files[selectedFile]) {
         socket.emit('code_update', { roomId, code: value, filename: selectedFile });
       }
-    }, 50), // 50ms debounce
+    }, 50),
     [socket, roomId, selectedFile]
   );
 
-  // New function to build directory structure
-  const buildFileTree = () => {
+  const fileTree = useMemo(() => {
     const tree = {};
     Object.keys(files).forEach(path => {
       const parts = path.split('/');
@@ -85,9 +71,8 @@ export default function CodeShare() {
       });
     });
     return tree;
-  };
+  }, [files]);
 
-  // Updated AI response parsing for directory structure
   const generateCodeWithAI = async () => {
     try {
       setIsAILoading(true);
@@ -110,16 +95,15 @@ export default function CodeShare() {
       const data = await response.json();
       const generatedCode = data.candidates[0].content.parts[0].text;
       
-      // Fixed regex to handle file parsing more accurately
-      const fileRegex = /^\/\/ FILENAME: (.*?)$\n([\s\S]*?)(?=^\/\/ FILENAME:|\Z)/gm;
+      const fileRegex = /^\s*\/\/\s*FILENAME:\s*(.+?)\s*$(?:\r\n?|\n)([\s\S]*?)(?=^\s*\/\/\s*FILENAME:|\Z)/gmi;
       const newFiles = {};
       let match;
       
       while ((match = fileRegex.exec(generatedCode)) !== null) {
         const fullPath = match[1].trim();
         const content = match[2].trim()
-          .replace(/\/\/ FILENAME:.*$/gm, '')  // Remove any accidental filename declarations
-          .replace(/\/\/.*/g, '')              // Remove other comments
+          .replace(/\/\/ FILENAME:.*$/gm, '')
+          .replace(/\/\/.*/g, '')
           .trim();
         
         if (fullPath && content.length > 0) {
@@ -127,12 +111,10 @@ export default function CodeShare() {
         }
       }
       
-      // Only update if we got valid files
       if (Object.keys(newFiles).length > 0) {
         setFiles(prev => {
-          const updatedFiles = { ...prev, ...newFiles };
+          const updatedFiles = { ...newFiles };
           if (socket) {
-            // Send the complete merged file state instead of just new files
             socket.emit('code_update', { roomId, code: updatedFiles });
           }
           return updatedFiles;
@@ -148,8 +130,11 @@ export default function CodeShare() {
     }
   };
 
-  // File tree renderer component
-  const FileTree = ({ data, level = 0 }) => {
+  const MemoizedFileTree = memo(({ data, level = 0 }) => {
+    const toggleFolder = useCallback((path) => {
+      setExpandedFolders(prev => new Set(prev)[path] ? prev.delete(path) : prev.add(path));
+    }, []);
+
     return Object.values(data).map((node) => (
       <div key={node.path}>
         <div
@@ -165,11 +150,7 @@ export default function CodeShare() {
                 className="mr-1"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setExpandedFolders(prev => {
-                    const next = new Set(prev);
-                    next.has(node.path) ? next.delete(node.path) : next.add(node.path);
-                    return next;
-                  });
+                  toggleFolder(node.path);
                 }}
               >
                 {expandedFolders.has(node.path) ? <FiChevronDown /> : <FiChevronRight />}
@@ -185,11 +166,21 @@ export default function CodeShare() {
           )}
         </div>
         {node.isFolder && expandedFolders.has(node.path) && (
-          <FileTree data={node.children} level={level + 1} />
+          <MemoizedFileTree data={node.children} level={level + 1} />
         )}
       </div>
     ));
-  };
+  });
+
+  const editorOptions = useMemo(() => ({
+    minimap: { enabled: false },
+    fontSize: 15,
+    scrollBeyondLastLine: false,
+    lineNumbersMinChars: 3,
+    padding: { top: 10 },
+    roundedSelection: false,
+    scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 }
+  }), []);
 
   return (
     <div className="flex h-screen">
@@ -225,7 +216,6 @@ export default function CodeShare() {
         </div>
 
         <div className="flex gap-6 h-[calc(100vh-200px)]">
-          {/* File Tree Panel */}
           <div className="w-64 bg-white rounded-lg shadow-sm border border-gray-200 p-2 overflow-y-auto">
             <div className="flex justify-between items-center mb-2">
               <h3 className="font-semibold text-gray-700">Project Files</h3>
@@ -245,10 +235,9 @@ export default function CodeShare() {
                 <FiFile className="inline-block mr-1" />+
               </button>
             </div>
-            <FileTree data={buildFileTree()} />
+            <MemoizedFileTree data={fileTree} />
           </div>
 
-          {/* Editor Panel */}
           <div className="flex-1 bg-white rounded-xl shadow-lg border border-gray-200">
             <div className="flex items-center justify-between p-2 border-b border-gray-200 bg-gray-50">
               <div className="flex items-center gap-2">
@@ -277,18 +266,7 @@ export default function CodeShare() {
               defaultLanguage="javascript"
               theme="vs-dark"
               value={files[selectedFile] || ''}
-              options={{ 
-                minimap: { enabled: false },
-                fontSize: 15,
-                scrollBeyondLastLine: false,
-                lineNumbersMinChars: 3,
-                padding: { top: 10 },
-                roundedSelection: false,
-                scrollbar: {
-                  verticalScrollbarSize: 6,
-                  horizontalScrollbarSize: 6
-                }
-              }}
+              options={editorOptions}
               onChange={(value) => {
                 setFiles(prev => ({ ...prev, [selectedFile]: value }));
                 handleEditorChange(value);
