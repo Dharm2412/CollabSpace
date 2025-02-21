@@ -3,11 +3,15 @@ import { useParams, useNavigate } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import io from "socket.io-client";
 import { debounce } from "lodash";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 import {
   FiFile,
   FiFolder,
   FiChevronRight,
   FiChevronDown,
+  FiDownload,
+  FiUpload,
 } from "react-icons/fi";
 import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
@@ -250,6 +254,113 @@ function CodeShare() {
     toast.success("File added");
   }, [socket, roomId]);
 
+  // Download all files as zip
+  const downloadCode = useCallback(() => {
+    const zip = new JSZip();
+    Object.entries(files).forEach(([path, content]) => {
+      zip.file(path, content);
+    });
+
+    zip
+      .generateAsync({ type: "blob" })
+      .then((content) => {
+        saveAs(content, `CodeRoom_${roomId}.zip`);
+        toast.success("Code downloaded successfully");
+      })
+      .catch((error) => {
+        console.error("Download Error:", error);
+        toast.error("Failed to download code");
+      });
+  }, [files, roomId]);
+
+  // Import folder or multiple files
+  const importFolder = useCallback(async () => {
+    try {
+      // Try directory picker (modern browsers)
+      if ("showDirectoryPicker" in window) {
+        const dirHandle = await window.showDirectoryPicker();
+        const newFiles = {};
+
+        const readDirectory = async (handle, basePath = "") => {
+          for await (const entry of handle.values()) {
+            const path = `${basePath}${entry.name}`;
+            if (entry.kind === "file") {
+              const file = await entry.getFile();
+              const content = await file.text();
+              newFiles[path] = content;
+            } else if (entry.kind === "directory") {
+              await readDirectory(entry, `${path}/`);
+            }
+          }
+        };
+
+        await readDirectory(dirHandle);
+        if (Object.keys(newFiles).length === 0) {
+          toast.error("No files found in the selected directory");
+          return;
+        }
+
+        setFiles((prev) => {
+          const updatedFiles = { ...prev, ...newFiles };
+          if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
+          return updatedFiles;
+        });
+        setSelectedFile(Object.keys(newFiles)[0]);
+        toast.success(`Imported ${Object.keys(newFiles).length} files`);
+      } else {
+        // Fallback to multiple file input
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.webkitdirectory = true; // For older browsers
+        input.directory = true;       // For some browsers
+        input.mozdirectory = true;    // For Firefox
+        
+        input.onchange = (e) => {
+          const selectedFiles = Array.from(e.target.files);
+          if (!selectedFiles.length) return;
+
+          const newFiles = {};
+          const promises = selectedFiles.map((file) => {
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                // Use webkitRelativePath or relativePath if available, otherwise just file.name
+                const path = file.webkitRelativePath || file.relativePath || file.name;
+                newFiles[path] = event.target.result;
+                resolve();
+              };
+              reader.onerror = () => {
+                toast.error(`Failed to read ${file.name}`);
+                resolve();
+              };
+              reader.readAsText(file);
+            });
+          });
+
+          Promise.all(promises).then(() => {
+            if (Object.keys(newFiles).length === 0) {
+              toast.error("No valid files imported");
+              return;
+            }
+
+            setFiles((prev) => {
+              const updatedFiles = { ...prev, ...newFiles };
+              if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
+              return updatedFiles;
+            });
+            setSelectedFile(Object.keys(newFiles)[0]);
+            toast.success(`Imported ${Object.keys(newFiles).length} files`);
+          });
+        };
+        input.click();
+      }
+    } catch (error) {
+      console.error("Import Error:", error);
+      toast.error("Failed to import folder");
+    }
+  }, [socket, roomId]);
+
   // Editor options
   const editorOptions = useMemo(
     () => ({
@@ -311,13 +422,29 @@ function CodeShare() {
           <div className="w-72 bg-white rounded-xl shadow-sm border border-gray-200 p-4 overflow-y-auto">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-semibold text-lg text-gray-700">Files</h3>
-              <button
-                onClick={addNewFile}
-                className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                title="Add new file"
-              >
-                <FiFile className="text-lg" />
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={addNewFile}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                  title="Add new file"
+                >
+                  <FiFile className="text-lg" />
+                </button>
+                <button
+                  onClick={importFolder}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                  title="Import folder"
+                >
+                  <FiUpload className="text-lg" />
+                </button>
+                <button
+                  onClick={downloadCode}
+                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
+                  title="Download all files"
+                >
+                  <FiDownload className="text-lg" />
+                </button>
+              </div>
             </div>
             <FileTree
               data={fileTree}
@@ -338,12 +465,26 @@ function CodeShare() {
                   {selectedFile}
                 </span>
               </div>
-              <button
-                onClick={addNewFile}
-                className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm flex items-center gap-1 transition-colors"
-              >
-                <FiFile /> New File
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={addNewFile}
+                  className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm flex items-center gap-1 transition-colors"
+                >
+                  <FiFile /> New File
+                </button>
+                <button
+                  onClick={importFolder}
+                  className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-sm flex items-center gap-1 transition-colors"
+                >
+                  <FiUpload /> Import Folder
+                </button>
+                <button
+                  onClick={downloadCode}
+                  className="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-md text-sm flex items-center gap-1 transition-colors"
+                >
+                  <FiDownload /> Download
+                </button>
+              </div>
             </div>
             <Editor
               key={selectedFile}
