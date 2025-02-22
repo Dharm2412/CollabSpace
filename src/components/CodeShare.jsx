@@ -17,7 +17,7 @@ import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
 
 const SOCKET_URL = "http://localhost:3001";
-const API_KEY = "AIzaSyBQdCEmQAKkd6qDYFcPK6aZ1Mkus2nqGa8";
+const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
@@ -302,7 +302,8 @@ function CodeShare() {
 
         setFiles((prev) => {
           const updatedFiles = { ...prev, ...newFiles };
-          if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
+          if (socket)
+            socket.emit("code_update", { roomId, code: updatedFiles });
           return updatedFiles;
         });
         setSelectedFile(Object.keys(newFiles)[0]);
@@ -313,9 +314,9 @@ function CodeShare() {
         input.type = "file";
         input.multiple = true;
         input.webkitdirectory = true; // For older browsers
-        input.directory = true;       // For some browsers
-        input.mozdirectory = true;    // For Firefox
-        
+        input.directory = true; // For some browsers
+        input.mozdirectory = true; // For Firefox
+
         input.onchange = (e) => {
           const selectedFiles = Array.from(e.target.files);
           if (!selectedFiles.length) return;
@@ -326,7 +327,8 @@ function CodeShare() {
               const reader = new FileReader();
               reader.onload = (event) => {
                 // Use webkitRelativePath or relativePath if available, otherwise just file.name
-                const path = file.webkitRelativePath || file.relativePath || file.name;
+                const path =
+                  file.webkitRelativePath || file.relativePath || file.name;
                 newFiles[path] = event.target.result;
                 resolve();
               };
@@ -346,7 +348,8 @@ function CodeShare() {
 
             setFiles((prev) => {
               const updatedFiles = { ...prev, ...newFiles };
-              if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
+              if (socket)
+                socket.emit("code_update", { roomId, code: updatedFiles });
               return updatedFiles;
             });
             setSelectedFile(Object.keys(newFiles)[0]);

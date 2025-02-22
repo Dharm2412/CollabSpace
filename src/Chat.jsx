@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { getAIResponse } from "./utils/gemini";
+import { getAIResponse } from "./utils/gemini"; // Updated to use Gemini API
 import RoomSidebar from "./components/RoomSidebar";
 import { toast } from "react-hot-toast";
 import { useSocket } from "./context/SocketContext";
@@ -22,7 +22,6 @@ const parseAIResponse = (text) => {
   lines.forEach((line, index) => {
     if (line.trim().startsWith("```")) {
       if (inCodeBlock) {
-        // End code block
         elements.push(
           <div
             key={`code-${index}`}
@@ -39,13 +38,11 @@ const parseAIResponse = (text) => {
         codeContent = [];
         inCodeBlock = false;
       } else {
-        // Start code block
         inCodeBlock = true;
       }
     } else if (inCodeBlock) {
       codeContent.push(line);
     } else if (line.trim().startsWith("# ")) {
-      // Level 1 heading - increased to 2xl
       elements.push(
         <h2
           key={`heading-${index}`}
@@ -55,7 +52,6 @@ const parseAIResponse = (text) => {
         </h2>
       );
     } else if (line.trim().startsWith("## ")) {
-      // Level 2 heading - increased to xl
       elements.push(
         <h3
           key={`heading-${index}`}
@@ -65,7 +61,6 @@ const parseAIResponse = (text) => {
         </h3>
       );
     } else if (line.trim().startsWith("### ")) {
-      // Level 3 heading - increased to lg
       elements.push(
         <h4
           key={`heading-${index}`}
@@ -75,7 +70,6 @@ const parseAIResponse = (text) => {
         </h4>
       );
     } else if (line.trim().startsWith("* ") || line.trim().startsWith("- ")) {
-      // Numbered list item - increased to lg
       listCounter++;
       elements.push(
         <div
@@ -91,7 +85,6 @@ const parseAIResponse = (text) => {
         </div>
       );
     } else if (line.trim().startsWith("**") && line.trim().endsWith("**")) {
-      // Italic text - increased to lg
       elements.push(
         <p
           key={`italic-${index}`}
@@ -101,7 +94,6 @@ const parseAIResponse = (text) => {
         </p>
       );
     } else if (line.trim()) {
-      // Paragraph - increased to lg
       elements.push(
         <p
           key={`para-${index}`}
@@ -115,7 +107,6 @@ const parseAIResponse = (text) => {
     }
   });
 
-  // Handle unclosed code block
   if (inCodeBlock && codeContent.length > 0) {
     elements.push(
       <div
@@ -148,14 +139,14 @@ function Chat() {
     localStorage.getItem("username") || ""
   );
   const [roomId, setRoomId] = useState(
-    localStorage.getItem(SESSION_KEY)?.roomId || ""
+    JSON.parse(localStorage.getItem(SESSION_KEY))?.roomId || ""
   );
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const [users, setUsers] = useState([]);
   const [isAILoading, setIsAILoading] = useState(false);
   const [userId] = useState(
-    localStorage.getItem(SESSION_KEY)?.userId || crypto.randomUUID()
+    JSON.parse(localStorage.getItem(SESSION_KEY))?.userId || crypto.randomUUID()
   );
 
   const messagesEndRef = useRef(null);
@@ -349,7 +340,7 @@ function Chat() {
       ) {
         aiText = "Dharm Sir (Dharm Patel)";
       } else {
-        aiText = await getAIResponse(trimmedMessage);
+        aiText = await getAIResponse(trimmedMessage); // Use Gemini API
       }
       const aiResponse = {
         id: Date.now() + Math.random().toString(36).substr(2, 9),
@@ -536,7 +527,7 @@ function Chat() {
                       : "bg-white text-gray-800 border-gray-200 rounded-bl-none"
                   }`}
                 >
-                  {!isUser && (
+                  {!isUser && message.sender && (
                     <div className="flex items-center space-x-2 mb-3">
                       <div
                         className={`w-8 h-8 rounded-full flex items-center justify-center ${
