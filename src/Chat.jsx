@@ -8,10 +8,10 @@ import { useSocket } from "./context/SocketContext";
 import { ref, onValue, onDisconnect, set } from "firebase/database";
 import { rtdb } from "./firebase";
 
-// Add localStorage persistence for user session
+// LocalStorage persistence for user session
 const SESSION_KEY = "chat_session";
 
-// Enhanced Markdown-like parser for AI response with increased text sizes
+// Enhanced Markdown-like parser for AI response with improved text formatting
 const parseAIResponse = (text) => {
   const lines = text.split("\n");
   let inCodeBlock = false;
@@ -25,12 +25,12 @@ const parseAIResponse = (text) => {
         elements.push(
           <div
             key={`code-${index}`}
-            className="my-4 border-l-4 border-teal-500 bg-gray-800 rounded-r-lg shadow-lg"
+            className="my-6 bg-gray-900 rounded-xl shadow-lg border border-gray-800 overflow-hidden transform transition-all hover:scale-[1.02]"
           >
-            <div className="bg-teal-600 text-white px-3 py-1 text-base font-mono rounded-tr-lg">
-              Code
+            <div className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white px-4 py-2 text-sm font-semibold uppercase tracking-wider">
+              Code Snippet
             </div>
-            <pre className="p-4 text-gray-200 text-base font-mono overflow-x-auto">
+            <pre className="p-4 text-gray-100 text-base font-mono leading-relaxed overflow-x-auto scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-800">
               <code>{codeContent.join("\n")}</code>
             </pre>
           </div>
@@ -46,7 +46,7 @@ const parseAIResponse = (text) => {
       elements.push(
         <h2
           key={`heading-${index}`}
-          className="text-2xl text-teal-700 font-semibold mt-6 mb-2 border-b-2 border-teal-200 pb-1"
+          className="text-3xl font-extrabold text-teal-800 mt-8 mb-4 pb-2 border-b-2 border-teal-400 bg-gradient-to-r from-teal-50 to-transparent rounded-t-md"
         >
           {line.replace(/^#\s*/, "")}
         </h2>
@@ -55,7 +55,7 @@ const parseAIResponse = (text) => {
       elements.push(
         <h3
           key={`heading-${index}`}
-          className="text-xl text-teal-600 font-semibold mt-4 mb-2 border-b border-teal-200 pb-1"
+          className="text-2xl font-bold text-teal-700 mt-6 mb-3 pb-1 border-b border-teal-300"
         >
           {line.replace(/^##\s*/, "")}
         </h3>
@@ -64,7 +64,7 @@ const parseAIResponse = (text) => {
       elements.push(
         <h4
           key={`heading-${index}`}
-          className="text-lg text-teal-500 font-semibold mt-3 mb-1"
+          className="text-xl font-semibold text-teal-600 mt-4 mb-2 italic"
         >
           {line.replace(/^###\s*/, "")}
         </h4>
@@ -74,12 +74,12 @@ const parseAIResponse = (text) => {
       elements.push(
         <div
           key={`list-${index}`}
-          className="flex items-start text-teal-900 my-1 ml-4"
+          className="flex items-start text-teal-900 my-4 ml-6 group"
         >
-          <span className="mr-2 text-teal-600 font-medium text-lg">
+          <span className="mr-3 text-teal-600 font-extrabold text-lg leading-none transition-transform group-hover:scale-110">
             {listCounter}.
           </span>
-          <span className="text-lg leading-relaxed">
+          <span className="text-lg leading-relaxed font-medium">
             {line.replace(/^[*|-]\s*/, "")}
           </span>
         </div>
@@ -87,8 +87,8 @@ const parseAIResponse = (text) => {
     } else if (line.trim().startsWith("**") && line.trim().endsWith("**")) {
       elements.push(
         <p
-          key={`italic-${index}`}
-          className="text-lg italic text-teal-800 leading-relaxed my-2"
+          key={`bold-${index}`}
+          className="text-lg font-bold text-teal-800 leading-relaxed my-4 bg-teal-50 px-3 py-1 rounded-md shadow-sm"
         >
           {line.replace(/\*\*/g, "")}
         </p>
@@ -97,7 +97,7 @@ const parseAIResponse = (text) => {
       elements.push(
         <p
           key={`para-${index}`}
-          className="text-lg text-teal-900 leading-relaxed my-2"
+          className="text-lg text-teal-900 leading-loose my-4 font-normal tracking-wide"
         >
           {line}
         </p>
@@ -111,12 +111,12 @@ const parseAIResponse = (text) => {
     elements.push(
       <div
         key={`code-end`}
-        className="my-4 border-l-4 border-teal-500 bg-gray-800 rounded-r-lg shadow-lg"
+        className="my-6 bg-gray-900 rounded-xl shadow-lg border border-gray-800 overflow-hidden transform transition-all hover:scale-[1.02]"
       >
-        <div className="bg-teal-600 text-white px-3 py-1 text-base font-mono rounded-tr-lg">
-          Code
+        <div className="bg-gradient-to-r from-teal-600 to-cyan-600 text-white px-4 py-2 text-sm font-semibold uppercase tracking-wider">
+          Code Snippet
         </div>
-        <pre className="p-4 text-gray-200 text-base font-mono overflow-x-auto">
+        <pre className="p-4 text-gray-100 text-base font-mono leading-relaxed overflow-x-auto scrollbar-thin scrollbar-thumb-teal-500 scrollbar-track-gray-800">
           <code>{codeContent.join("\n")}</code>
         </pre>
       </div>
@@ -124,9 +124,11 @@ const parseAIResponse = (text) => {
   }
 
   return elements.length > 0 ? (
-    <div className="space-y-1">{elements}</div>
+    <div className="space-y-4">{elements}</div>
   ) : (
-    <p className="text-lg text-teal-900 leading-relaxed">{text}</p>
+    <p className="text-lg text-teal-900 leading-loose font-normal tracking-wide">
+      {text}
+    </p>
   );
 };
 
@@ -338,9 +340,9 @@ function Chat() {
           trimmedMessage
         )
       ) {
-        aiText = "Dharm Sir (Dharm Patel)";
+        aiText = "Dharm Patel"; // Respond with "Dharm Patel" for specific queries
       } else {
-        aiText = await getAIResponse(trimmedMessage); // Use Gemini API
+        aiText = await getAIResponse(trimmedMessage); // Use Gemini API for other queries
       }
       const aiResponse = {
         id: Date.now() + Math.random().toString(36).substr(2, 9),

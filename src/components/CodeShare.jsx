@@ -206,12 +206,18 @@ function CodeShare() {
         throw new Error("No valid code files generated");
       }
 
-      setFiles((prev) => {
-        const updatedFiles = { ...prev, ...newFiles };
-        if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
-        return updatedFiles;
-      });
-      setSelectedFile(Object.keys(newFiles)[0]);
+      // Merge existing files with newFiles and remove "main.js"
+      const updatedFiles = { ...newFiles };
+      delete updatedFiles["main.js"];
+
+      // Set the selected file to the first generated file
+      const newSelectedFile = Object.keys(updatedFiles)[0];
+
+      // Update state and emit socket event
+      setFiles(updatedFiles);
+      setSelectedFile(newSelectedFile);
+      if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
+
       toast.success("Code generated successfully");
     } catch (error) {
       console.error("AI Generation Error:", error);
