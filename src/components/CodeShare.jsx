@@ -12,18 +12,19 @@ import {
   FiChevronDown,
   FiDownload,
   FiUpload,
+  FiTrash2,
+  FiPlus,
 } from "react-icons/fi";
 import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
-import { db } from "../firebase"; // Adjust the import path to your Firebase config
+import { db } from "../firebase";
 
 const SOCKET_URL = "http://localhost:3001";
 const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
-// Memoized FileTree Component
 const FileTree = memo(
   ({
     data,
@@ -32,101 +33,105 @@ const FileTree = memo(
     onSelectFile,
     expandedFolders,
     toggleFolder,
-  }) => {
-    return Object.values(data).map((node) => (
-      <div key={node.path}>
-        <div
-          className={`flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer ${
-            selectedFile === node.path
-              ? "bg-blue-50 border border-blue-200"
-              : ""
-          }`}
-          style={{ paddingLeft: `${level * 20 + 8}px` }}
-          onClick={() => !node.isFolder && onSelectFile(node.path)}
-        >
-          {node.isFolder ? (
-            <>
-              <button
-                className="mr-1 focus:outline-none"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFolder(node.path);
-                }}
-              >
-                {expandedFolders.has(node.path) ? (
-                  <FiChevronDown />
-                ) : (
-                  <FiChevronRight />
-                )}
-              </button>
-              <FiFolder className="mr-2 text-blue-500" />
-              <span className="font-medium text-gray-700">{node.name}</span>
-            </>
-          ) : (
-            <>
-              <FiFile className="mr-2 text-gray-500 ml-4" />
-              <span className="text-gray-700">{node.name}</span>
-            </>
+  }) => (
+    <div className="space-y-1">
+      {Object.values(data).map((node) => (
+        <div key={node.path}>
+          <div
+            className={`flex items-center py-1.5 px-2 rounded-md cursor-pointer transition-colors duration-150 ${
+              selectedFile === node.path
+                ? "bg-blue-50 border-l-2 border-blue-500"
+                : "hover:bg-gray-100"
+            }`}
+            style={{ paddingLeft: `${level * 16 + 8}px` }}
+            onClick={() => !node.isFolder && onSelectFile(node.path)}
+          >
+            {node.isFolder ? (
+              <>
+                <button
+                  className="mr-1 text-gray-500 hover:text-gray-700 focus:outline-none"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFolder(node.path);
+                  }}
+                >
+                  {expandedFolders.has(node.path) ? (
+                    <FiChevronDown size={14} />
+                  ) : (
+                    <FiChevronRight size={14} />
+                  )}
+                </button>
+                <FiFolder className="mr-1 text-blue-400" size={14} />
+                <span className="text-sm text-gray-800 truncate">
+                  {node.name}
+                </span>
+              </>
+            ) : (
+              <>
+                <FiFile className="mr-1 text-gray-400" size={14} />
+                <span className="text-sm text-gray-700 truncate">
+                  {node.name}
+                </span>
+              </>
+            )}
+          </div>
+          {node.isFolder && expandedFolders.has(node.path) && (
+            <FileTree
+              data={node.children}
+              level={level + 1}
+              selectedFile={selectedFile}
+              onSelectFile={onSelectFile}
+              expandedFolders={expandedFolders}
+              toggleFolder={toggleFolder}
+            />
           )}
         </div>
-        {node.isFolder && expandedFolders.has(node.path) && (
-          <FileTree
-            data={node.children}
-            level={level + 1}
-            selectedFile={selectedFile}
-            onSelectFile={onSelectFile}
-            expandedFolders={expandedFolders}
-            toggleFolder={toggleFolder}
-          />
-        )}
-      </div>
-    ));
-  }
+      ))}
+    </div>
+  )
 );
 
-function CodeShare() {
+const CodeShare = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const [files, setFiles] = useState({});
+  const [files, setFiles] = useState({ "main.js": "" });
   const [users, setUsers] = useState([]);
   const [socket, setSocket] = useState(null);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isAILoading, setIsAILoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFile, setSelectedFile] = useState("main.js");
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [username] = useState(localStorage.getItem("username") || "Anonymous");
-  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
-  // Load files from Firestore
+  // Firestore Sync
   useEffect(() => {
     const roomDocRef = doc(db, "codeRooms", roomId);
     const unsubscribe = onSnapshot(roomDocRef, (docSnapshot) => {
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
-        setFiles(data.files || {});
-        if (!selectedFile && Object.keys(data.files || {}).length > 0) {
-          setSelectedFile(Object.keys(data.files)[0]);
-        }
+        const newFiles = data.files || { "main.js": "" };
+        setFiles(newFiles);
+        if (!newFiles[selectedFile]) setSelectedFile(Object.keys(newFiles)[0]);
       } else {
-        setFiles({});
+        setDoc(roomDocRef, { files: { "main.js": "" } });
       }
     });
     return () => unsubscribe();
   }, [roomId, selectedFile]);
 
-  // Socket setup and cleanup
+  // Socket.IO Connection
   useEffect(() => {
     const newSocket = io(SOCKET_URL, { reconnectionAttempts: 5 });
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
       newSocket.emit("join-room", { roomId, username });
-      toast.success("Connected to room");
+      toast.success("Connected");
     });
 
     newSocket.on("connect_error", () => {
-      toast.error("Failed to connect to server");
-      navigate("/chat");
+      toast.error("Connection failed");
+      setTimeout(() => navigate("/chat"), 2000);
     });
 
     newSocket.on("room-data", ({ users }) => setUsers(users));
@@ -134,42 +139,33 @@ function CodeShare() {
       "code_update",
       debounce((newFiles) => {
         setFiles((prev) =>
-          JSON.stringify(prev) !== JSON.stringify(newFiles) ? newFiles : prev
+          JSON.stringify(prev) === JSON.stringify(newFiles) ? prev : newFiles
         );
       }, 50)
     );
     newSocket.on("user_list", setUsers);
 
-    return () => {
-      newSocket.disconnect();
-    };
+    return () => newSocket.disconnect();
   }, [roomId, username, navigate]);
 
-  // Save files to Firestore whenever they change
+  // Sync files to Firestore
   useEffect(() => {
-    if (Object.keys(files).length > 0) {
-      const roomDocRef = doc(db, "codeRooms", roomId);
-      setDoc(roomDocRef, { files }, { merge: true }).catch((error) =>
-        console.error("Error saving files:", error)
-      );
-    }
+    if (!Object.keys(files).length) return;
+    const roomDocRef = doc(db, "codeRooms", roomId);
+    setDoc(roomDocRef, { files }, { merge: true });
   }, [files, roomId]);
 
-  // Editor change handler
   const handleEditorChange = useCallback(
     debounce((value) => {
-      if (socket && value !== files[selectedFile]) {
-        const updatedFiles = { ...files, [selectedFile]: value };
-        setFiles(updatedFiles);
-        socket.emit("code_update", { roomId, code: updatedFiles });
-      }
-    }, 50),
+      if (!socket || !selectedFile || value === files[selectedFile]) return;
+      const updatedFiles = { ...files, [selectedFile]: value || "" };
+      setFiles(updatedFiles);
+      socket.emit("code_update", { roomId, code: updatedFiles });
+    }, 100),
     [socket, roomId, selectedFile, files]
   );
 
-  // File tree computation
   const fileTree = useMemo(() => {
-    setIsProcessingFiles(true);
     const tree = {};
     Object.keys(files).forEach((path) => {
       const parts = path.split("/").filter(Boolean);
@@ -186,17 +182,11 @@ function CodeShare() {
         currentLevel = currentLevel[part].children;
       });
     });
-    setIsProcessingFiles(false);
     return tree;
   }, [files]);
 
-  // AI code generation
   const generateCodeWithAI = async () => {
-    if (!aiPrompt.trim()) {
-      toast.error("Please enter a prompt");
-      return;
-    }
-
+    if (!aiPrompt.trim()) return toast.error("Enter a prompt");
     setIsAILoading(true);
     try {
       const response = await fetch(`${AI_API_URL}?key=${API_KEY}`, {
@@ -207,9 +197,7 @@ function CodeShare() {
             {
               parts: [
                 {
-                  text: `As a senior developer, generate clean code without comments. 
-                     Structure response with // FILENAME: before each file. 
-                     Request: ${aiPrompt}`,
+                  text: `You are an expert developer. Generate clean, functional code with NO comments. Structure with "// FILENAME: <filename>" (e.g., "// FILENAME: src/App.js"). Use proper extensions (.js, .css, .html) and folder structures (e.g., src/components/). Ensure code is complete and syntactically correct. Request: ${aiPrompt}`,
                 },
               ],
             },
@@ -217,36 +205,29 @@ function CodeShare() {
         }),
       });
 
-      if (!response.ok) throw new Error("AI API request failed");
-
+      if (!response.ok) throw new Error("AI API failed");
       const data = await response.json();
       const generatedCode = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!generatedCode) throw new Error("No valid response from AI");
+      if (!generatedCode) throw new Error("No code generated");
 
       const fileRegex =
-        /^\s*\/\/\s*FILENAME:\s*(.+?)\s*$(?:\r\n?|\n)([\s\S]*?)(?=^\s*\/\/\s*FILENAME:|\Z)/gim;
+        /^\s*\/\/\s*FILENAME:\s*([^\s]+.*?)(?:\r\n|\n|\r)([\s\S]*?)(?=(^\s*\/\/\s*FILENAME:|\Z))/gim;
       const newFiles = {};
       let match;
-
       while ((match = fileRegex.exec(generatedCode)) !== null) {
         const fullPath = match[1].trim();
         const content = match[2].trim();
-        if (fullPath && content) newFiles[fullPath] = content;
+        if (fullPath && content && /\.\w+$/.test(fullPath))
+          newFiles[fullPath] = content;
       }
 
-      if (Object.keys(newFiles).length === 0) {
-        throw new Error("No valid code files generated");
-      }
-
-      // Merge new files with existing ones
-      const updatedFiles = { ...files, ...newFiles };
-      setFiles(updatedFiles);
+      if (!Object.keys(newFiles).length)
+        throw new Error("No valid files generated");
+      setFiles(newFiles);
       setSelectedFile(Object.keys(newFiles)[0]);
-      if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
-
-      toast.success("Code generated successfully");
+      socket?.emit("code_update", { roomId, code: newFiles });
+      toast.success(`Generated ${Object.keys(newFiles).length} files`);
     } catch (error) {
-      console.error("AI Generation Error:", error);
       toast.error(error.message || "Failed to generate code");
     } finally {
       setIsAILoading(false);
@@ -254,7 +235,84 @@ function CodeShare() {
     }
   };
 
-  // File tree handlers
+  const addNewFile = useCallback(() => {
+    const newPath = prompt("Enter file path (e.g., src/App.js):")?.trim();
+    if (!newPath || !/\.\w+$/.test(newPath))
+      return toast.error("Invalid file name");
+    if (files[newPath]) return toast.error("File exists");
+    const updatedFiles = { ...files, [newPath]: "" };
+    setFiles(updatedFiles);
+    setSelectedFile(newPath);
+    socket?.emit("code_update", { roomId, code: updatedFiles });
+  }, [files, socket, roomId]);
+
+  const resetFiles = useCallback(() => {
+    if (!window.confirm("Reset to main.js? All other files will be deleted."))
+      return;
+    const updatedFiles = { "main.js": "" };
+    setFiles(updatedFiles);
+    setSelectedFile("main.js");
+    socket?.emit("code_update", { roomId, code: updatedFiles });
+    toast.success("Reset complete");
+  }, [socket, roomId]);
+
+  const downloadCode = useCallback(async () => {
+    const zip = new JSZip();
+    Object.entries(files).forEach(([path, content]) => zip.file(path, content));
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, `CodeRoom_${roomId}.zip`);
+    toast.success("Downloaded");
+  }, [files, roomId]);
+
+  const importFolder = useCallback(async () => {
+    const loadingToast = toast.loading("Importing...");
+    try {
+      const newFiles = {};
+      if ("showDirectoryPicker" in window) {
+        const dirHandle = await window.showDirectoryPicker();
+        const readDirectory = async (handle, basePath = "") => {
+          for await (const entry of handle.values()) {
+            const path = `${basePath}${entry.name}`;
+            if (entry.kind === "file")
+              newFiles[path] = await (await entry.getFile()).text();
+            else if (entry.kind === "directory")
+              await readDirectory(entry, `${path}/`);
+          }
+        };
+        await readDirectory(dirHandle);
+      } else {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.webkitdirectory = true;
+        await new Promise((resolve) => {
+          input.onchange = async (e) => {
+            await Promise.all(
+              Array.from(e.target.files).map(
+                async (file) =>
+                  (newFiles[file.webkitRelativePath || file.name] =
+                    await file.text())
+              )
+            );
+            resolve();
+          };
+          input.click();
+        });
+      }
+
+      if (!Object.keys(newFiles).length) throw new Error("No files imported");
+      const updatedFiles = { ...files, ...newFiles };
+      setFiles(updatedFiles);
+      setSelectedFile(Object.keys(newFiles)[0]);
+      socket?.emit("code_update", { roomId, code: updatedFiles });
+      toast.success(`Imported ${Object.keys(newFiles).length} files`);
+    } catch (error) {
+      toast.error(error.message || "Import failed");
+    } finally {
+      toast.dismiss(loadingToast);
+    }
+  }, [files, socket, roomId]);
+
   const toggleFolder = useCallback((path) => {
     setExpandedFolders((prev) => {
       const newSet = new Set(prev);
@@ -263,188 +321,46 @@ function CodeShare() {
     });
   }, []);
 
-  const addNewFile = useCallback(() => {
-    const newPath = prompt(
-      "Enter file/folder path (e.g. src/components/Button.js):"
-    );
-    if (!newPath || !newPath.trim()) return;
-
-    const trimmedPath = newPath.trim();
-    setFiles((prev) => {
-      if (prev[trimmedPath]) {
-        toast.error("File already exists");
-        return prev;
-      }
-      const updatedFiles = {
-        ...prev,
-        [trimmedPath]: "// Start coding here...",
-      };
-      if (socket) socket.emit("code_update", { roomId, code: updatedFiles });
-      return updatedFiles;
-    });
-    setSelectedFile(trimmedPath);
-    toast.success("File added");
-  }, [socket, roomId]);
-
-  // Download all files as zip
-  const downloadCode = useCallback(() => {
-    const zip = new JSZip();
-    Object.entries(files).forEach(([path, content]) => {
-      zip.file(path, content);
-    });
-
-    zip
-      .generateAsync({ type: "blob" })
-      .then((content) => {
-        saveAs(content, `CodeRoom_${roomId}.zip`);
-        toast.success("Code downloaded successfully");
-      })
-      .catch((error) => {
-        console.error("Download Error:", error);
-        toast.error("Failed to download code");
-      });
-  }, [files, roomId]);
-
-  // Import folder or multiple files
-  const importFolder = useCallback(async () => {
-    try {
-      const loadingToast = toast.loading("Importing files...");
-      let newFiles = {};
-
-      // Try directory picker (modern browsers)
-      if ("showDirectoryPicker" in window) {
-        const dirHandle = await window.showDirectoryPicker();
-        const readDirectory = async (handle, basePath = "") => {
-          for await (const entry of handle.values()) {
-            const path = `${basePath}${entry.name}`;
-            if (entry.kind === "file") {
-              const file = await entry.getFile();
-              const content = await file.text();
-              newFiles[path] = content;
-            } else if (entry.kind === "directory") {
-              await readDirectory(entry, `${path}/`);
-            }
-          }
-        };
-
-        await readDirectory(dirHandle);
-        if (Object.keys(newFiles).length === 0) {
-          toast.dismiss(loadingToast);
-          toast.error("No files found in the selected directory");
-          return;
-        }
-
-        setFiles((prev) => {
-          const updatedFiles = { ...prev, ...newFiles };
-          if (socket)
-            socket.emit("code_update", { roomId, code: updatedFiles });
-          return updatedFiles;
-        });
-        setSelectedFile(Object.keys(newFiles)[0]);
-        toast.dismiss(loadingToast);
-        toast.success(`Imported ${Object.keys(newFiles).length} files`);
-      } else {
-        // Fallback to multiple file input
-        await new Promise((resolve) => {
-          const input = document.createElement("input");
-          input.type = "file";
-          input.multiple = true;
-          input.webkitdirectory = true; // For older browsers
-          input.directory = true; // For some browsers
-          input.mozdirectory = true; // For Firefox
-
-          input.onchange = async (e) => {
-            try {
-              const selectedFiles = Array.from(e.target.files);
-              if (!selectedFiles.length) return;
-
-              const readPromises = selectedFiles.map((file) => {
-                return new Promise((resolve) => {
-                  const reader = new FileReader();
-                  reader.onload = (event) => {
-                    const path =
-                      file.webkitRelativePath || file.relativePath || file.name;
-                    newFiles[path] = event.target.result;
-                    resolve();
-                  };
-                  reader.onerror = () => {
-                    toast.error(`Failed to read ${file.name}`);
-                    resolve();
-                  };
-                  reader.readAsText(file);
-                });
-              });
-
-              await Promise.all(readPromises);
-              resolve();
-            } catch (error) {
-              toast.error("Import failed");
-              resolve();
-            }
-          };
-          input.click();
-        });
-
-        if (Object.keys(newFiles).length === 0) {
-          toast.dismiss(loadingToast);
-          toast.error("No files found in the selected directory");
-          return;
-        }
-
-        setFiles((prev) => {
-          const updatedFiles = { ...prev, ...newFiles };
-          if (socket)
-            socket.emit("code_update", { roomId, code: updatedFiles });
-          return updatedFiles;
-        });
-
-        toast.dismiss(loadingToast);
-        toast.success(`Imported ${Object.keys(newFiles).length} files`);
-      }
-    } catch (error) {
-      toast.dismiss();
-      console.error("Import Error:", error);
-      toast.error("Failed to import folder");
-    }
-  }, [socket, roomId]);
-
-  // Editor options
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
-      fontSize: 16,
+      fontSize: 14,
       scrollBeyondLastLine: false,
       lineNumbersMinChars: 3,
-      padding: { top: 10 },
+      padding: { top: 8, bottom: 8 },
       roundedSelection: false,
-      scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+      scrollbar: { vertical: "auto", horizontal: "auto" },
       wordWrap: "on",
+      smoothScrolling: true,
+      formatOnType: true,
+      formatOnPaste: true,
     }),
     []
   );
 
-  if (!socket)
+  if (!socket) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        Connecting...
+      <div className="flex h-screen items-center justify-center bg-gray-100">
+        <span className="animate-pulse text-gray-600">Connecting...</span>
       </div>
     );
+  }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-100 font-sans antialiased">
       <RoomSidebar roomId={roomId} users={users} />
-      <div className="flex-1 p-6">
-        <div className="mb-6 space-y-4">
-          <h2 className="text-3xl font-bold text-gray-800">
-            Code Room: {roomId}
+      <div className="flex-1 flex flex-col p-4 overflow-hidden">
+        <header className="mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">
+            Room: <span className="font-mono text-blue-600">{roomId}</span>
           </h2>
-          <div className="flex gap-3 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <div className="mt-3 flex items-center gap-3 bg-white p-3 rounded-lg shadow-sm border border-gray-200">
             <input
               type="text"
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="Describe the code you want (e.g., 'React todo app with hooks')"
-              className="flex-1 px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-gray-700"
+              placeholder="e.g., 'React todo app'"
+              className="flex-1 px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-700 focus:ring-1 focus:ring-blue-500 focus:border-transparent outline-none text-sm placeholder-gray-400"
               disabled={isAILoading}
             />
             <button
@@ -463,85 +379,81 @@ function CodeShare() {
               )}
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="flex gap-6 h-[calc(100vh-200px)]">
-          <div className="w-72 bg-white rounded-xl shadow-sm border border-gray-200 p-4 overflow-y-auto relative">
-            {isProcessingFiles && (
-              <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
-                <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-              </div>
-            )}
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-lg text-gray-700">Files</h3>
+        <div className="flex flex-1 gap-4 overflow-hidden">
+          <aside className="w-64 bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-800">Files</h3>
               <div className="flex gap-2">
                 <button
                   onClick={addNewFile}
-                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                  title="Add new file"
+                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-md"
+                  title="New File"
                 >
-                  <FiFile className="text-lg" />
+                  <FiPlus size={18} />
                 </button>
                 <button
                   onClick={importFolder}
-                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                  title="Import folder"
+                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-md"
+                  title="Import Folder"
                 >
-                  <FiUpload className="text-lg" />
+                  <FiUpload size={18} />
                 </button>
                 <button
                   onClick={downloadCode}
-                  className="p-1 hover:bg-gray-100 rounded text-gray-600 transition-colors"
-                  title="Download all files"
+                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-md"
+                  title="Download All"
                 >
-                  <FiDownload className="text-lg" />
+                  <FiDownload size={18} />
+                </button>
+                <button
+                  onClick={resetFiles}
+                  className="p-2 text-red-600 hover:bg-red-100 rounded-md"
+                  title="Reset"
+                >
+                  <FiTrash2 size={18} />
                 </button>
               </div>
             </div>
-            <FileTree
-              data={fileTree}
-              selectedFile={selectedFile}
-              onSelectFile={setSelectedFile}
-              expandedFolders={expandedFolders}
-              toggleFolder={toggleFolder}
-            />
-          </div>
+            <div className="flex-1 overflow-y-auto">
+              {Object.keys(files).length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-2">
+                  No files
+                </p>
+              ) : (
+                <FileTree
+                  data={fileTree}
+                  selectedFile={selectedFile}
+                  onSelectFile={setSelectedFile}
+                  expandedFolders={expandedFolders}
+                  toggleFolder={toggleFolder}
+                />
+              )}
+            </div>
+          </aside>
 
-          <div className="flex-1 bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden relative">
-            {isProcessingFiles && (
-              <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
-                <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-              </div>
-            )}
-            {selectedFile ? (
+          <main className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+            {selectedFile && files[selectedFile] !== undefined ? (
               <>
-                <div className="flex items-center justify-between p-3 border-b border-gray-200 bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-600">
-                      Editing:
-                    </span>
-                    <span className="px-2 py-1 bg-gray-100 rounded text-sm font-mono text-gray-800">
+                <div className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200">
+                  <span className="text-xs text-gray-600 truncate">
+                    <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">
                       {selectedFile}
                     </span>
-                  </div>
+                  </span>
                   <div className="flex gap-2">
                     <button
                       onClick={addNewFile}
-                      className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm flex items-center gap-1 transition-colors"
+                      className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 text-base font-medium"
                     >
-                      <FiFile /> New File
-                    </button>
-                    <button
-                      onClick={importFolder}
-                      className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-sm flex items-center gap-1 transition-colors"
-                    >
-                      <FiUpload /> Import Folder
+                      New
                     </button>
                     <button
                       onClick={downloadCode}
-                      className="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-md text-sm flex items-center gap-1 transition-colors"
+                      className="px-4 py-2 bg-purple-50 text-purple-600 rounded-md hover:bg-purple-100 text-base font-medium"
                     >
-                      <FiDownload /> Download
+                      Download
                     </button>
                   </div>
                 </div>
@@ -558,18 +470,23 @@ function CodeShare() {
                   value={files[selectedFile] || ""}
                   options={editorOptions}
                   onChange={handleEditorChange}
+                  loading={
+                    <div className="flex items-center justify-center h-full text-gray-500">
+                      Loading...
+                    </div>
+                  }
                 />
               </>
             ) : (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500">Select a file to edit</p>
+              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                Select a file or generate code
               </div>
             )}
-          </div>
+          </main>
         </div>
       </div>
     </div>
   );
-}
+};
 
 export default CodeShare;
