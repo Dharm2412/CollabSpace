@@ -106,16 +106,22 @@ const CodeShare = () => {
   // Firestore Sync
   useEffect(() => {
     const roomDocRef = doc(db, "codeRooms", roomId);
-    const unsubscribe = onSnapshot(roomDocRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        const newFiles = data.files || { "main.js": "" };
-        setFiles(newFiles);
-        if (!newFiles[selectedFile]) setSelectedFile(Object.keys(newFiles)[0]);
-      } else {
-        setDoc(roomDocRef, { files: { "main.js": "" } });
-      }
-    });
+    const unsubscribe = onSnapshot(
+      roomDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data();
+          const newFiles = data.files || { "main.js": "" };
+          setFiles(newFiles);
+          if (!newFiles[selectedFile]) {
+            setSelectedFile(Object.keys(newFiles)[0] || null);
+          }
+        } else {
+          setDoc(roomDocRef, { files: { "main.js": "" } });
+        }
+      },
+      (error) => toast.error("Failed to sync with Firestore: " + error.message)
+    );
     return () => unsubscribe();
   }, [roomId, selectedFile]);
 
@@ -141,19 +147,28 @@ const CodeShare = () => {
         setFiles((prev) =>
           JSON.stringify(prev) === JSON.stringify(newFiles) ? prev : newFiles
         );
+        if (newFiles && !newFiles[selectedFile]) {
+          setSelectedFile(Object.keys(newFiles)[0] || null);
+        }
       }, 50)
     );
     newSocket.on("user_list", setUsers);
 
     return () => newSocket.disconnect();
-  }, [roomId, username, navigate]);
+  }, [roomId, username, navigate, selectedFile]);
 
-  // Sync files to Firestore
-  useEffect(() => {
-    if (!Object.keys(files).length) return;
-    const roomDocRef = doc(db, "codeRooms", roomId);
-    setDoc(roomDocRef, { files }, { merge: true });
-  }, [files, roomId]);
+  // Sync files to Firestore with explicit control
+  const syncFilesToFirestore = useCallback(
+    async (newFiles) => {
+      const roomDocRef = doc(db, "codeRooms", roomId);
+      try {
+        await setDoc(roomDocRef, { files: newFiles }, { merge: true });
+      } catch (error) {
+        toast.error("Failed to sync files: " + error.message);
+      }
+    },
+    [roomId]
+  );
 
   const handleEditorChange = useCallback(
     debounce((value) => {
@@ -161,8 +176,9 @@ const CodeShare = () => {
       const updatedFiles = { ...files, [selectedFile]: value || "" };
       setFiles(updatedFiles);
       socket.emit("code_update", { roomId, code: updatedFiles });
+      syncFilesToFirestore(updatedFiles);
     }, 100),
-    [socket, roomId, selectedFile, files]
+    [socket, roomId, selectedFile, files, syncFilesToFirestore]
   );
 
   const fileTree = useMemo(() => {
@@ -226,6 +242,7 @@ const CodeShare = () => {
       setFiles(newFiles);
       setSelectedFile(Object.keys(newFiles)[0]);
       socket?.emit("code_update", { roomId, code: newFiles });
+      await syncFilesToFirestore(newFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
     } catch (error) {
       toast.error(error.message || "Failed to generate code");
@@ -244,17 +261,22 @@ const CodeShare = () => {
     setFiles(updatedFiles);
     setSelectedFile(newPath);
     socket?.emit("code_update", { roomId, code: updatedFiles });
-  }, [files, socket, roomId]);
+    syncFilesToFirestore(updatedFiles);
+  }, [files, socket, roomId, syncFilesToFirestore]);
 
-  const resetFiles = useCallback(() => {
-    if (!window.confirm("Reset to main.js? All other files will be deleted."))
+  const deleteAllFiles = useCallback(async () => {
+    if (!window.confirm("Delete all files? This action cannot be undone."))
       return;
-    const updatedFiles = { "main.js": "" };
-    setFiles(updatedFiles);
-    setSelectedFile("main.js");
-    socket?.emit("code_update", { roomId, code: updatedFiles });
-    toast.success("Reset complete");
-  }, [socket, roomId]);
+    const emptyFiles = {};
+    setFiles(emptyFiles);
+    setSelectedFile(null);
+    setExpandedFolders(new Set());
+    if (socket) {
+      socket.emit("code_update", { roomId, code: emptyFiles });
+    }
+    await syncFilesToFirestore(emptyFiles); // Ensure Firestore is updated immediately
+    toast.success("All files deleted");
+  }, [socket, roomId, syncFilesToFirestore]);
 
   const downloadCode = useCallback(async () => {
     const zip = new JSZip();
@@ -305,13 +327,14 @@ const CodeShare = () => {
       setFiles(updatedFiles);
       setSelectedFile(Object.keys(newFiles)[0]);
       socket?.emit("code_update", { roomId, code: updatedFiles });
+      await syncFilesToFirestore(updatedFiles);
       toast.success(`Imported ${Object.keys(newFiles).length} files`);
     } catch (error) {
       toast.error(error.message || "Import failed");
     } finally {
       toast.dismiss(loadingToast);
     }
-  }, [files, socket, roomId]);
+  }, [files, socket, roomId, syncFilesToFirestore]);
 
   const toggleFolder = useCallback((path) => {
     setExpandedFolders((prev) => {
@@ -407,13 +430,6 @@ const CodeShare = () => {
                 >
                   <FiDownload size={18} />
                 </button>
-                <button
-                  onClick={resetFiles}
-                  className="p-2 text-red-600 hover:bg-red-100 rounded-md"
-                  title="Reset"
-                >
-                  <FiTrash2 size={18} />
-                </button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -454,6 +470,13 @@ const CodeShare = () => {
                       className="px-4 py-2 bg-purple-50 text-purple-600 rounded-md hover:bg-purple-100 text-base font-medium"
                     >
                       Download
+                    </button>
+                    <button
+                      onClick={deleteAllFiles}
+                      className="px-4 py-2 bg-red-50 text-red-600 rounded-md hover:bg-red-100 text-base font-medium"
+                      title="Delete All Files"
+                    >
+                      Delete
                     </button>
                   </div>
                 </div>
