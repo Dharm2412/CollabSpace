@@ -14,6 +14,7 @@ import {
   FiUpload,
   FiTrash2,
   FiPlus,
+  FiCode,
 } from "react-icons/fi";
 import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
@@ -21,7 +22,7 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 const SOCKET_URL = "http://localhost:3001";
-const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
+const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM"; // Replace with your actual API key
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
@@ -33,6 +34,7 @@ const FileTree = memo(
     onSelectFile,
     expandedFolders,
     toggleFolder,
+    onDeleteFile,
   }) => (
     <div className="space-y-1">
       {Object.values(data).map((node) => (
@@ -69,9 +71,19 @@ const FileTree = memo(
             ) : (
               <>
                 <FiFile className="mr-1 text-gray-400" size={14} />
-                <span className="text-sm text-gray-700 truncate">
+                <span className="text-sm text-gray-700 truncate flex-1">
                   {node.name}
                 </span>
+                <button
+                  className="ml-2 text-red-500 hover:text-red-700"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteFile(node.path);
+                  }}
+                  title="Delete File"
+                >
+                  <FiTrash2 size={12} />
+                </button>
               </>
             )}
           </div>
@@ -83,6 +95,7 @@ const FileTree = memo(
               onSelectFile={onSelectFile}
               expandedFolders={expandedFolders}
               toggleFolder={toggleFolder}
+              onDeleteFile={onDeleteFile}
             />
           )}
         </div>
@@ -113,14 +126,15 @@ const CodeShare = () => {
           const data = docSnapshot.data();
           const newFiles = data.files || {};
           setFiles(newFiles);
-          if (!newFiles[selectedFile] && Object.keys(newFiles).length > 0) {
-            setSelectedFile(Object.keys(newFiles)[0]);
+          if (!selectedFile || !newFiles[selectedFile]) {
+            const firstFile = Object.keys(newFiles)[0];
+            setSelectedFile(firstFile || null);
           }
         } else {
           setDoc(roomDocRef, { files: {} });
         }
       },
-      (error) => toast.error("Failed to sync with Firestore: " + error.message)
+      (error) => toast.error("Firestore sync failed: " + error.message)
     );
     return () => unsubscribe();
   }, [roomId, selectedFile]);
@@ -132,7 +146,7 @@ const CodeShare = () => {
 
     newSocket.on("connect", () => {
       newSocket.emit("join-room", { roomId, username });
-      toast.success("Connected");
+      toast.success("Connected to room");
     });
 
     newSocket.on("connect_error", () => {
@@ -147,7 +161,7 @@ const CodeShare = () => {
         setFiles((prev) =>
           JSON.stringify(prev) === JSON.stringify(newFiles) ? prev : newFiles
         );
-        if (newFiles && !newFiles[selectedFile] && Object.keys(newFiles).length > 0) {
+        if (!newFiles[selectedFile] && Object.keys(newFiles).length > 0) {
           setSelectedFile(Object.keys(newFiles)[0]);
         }
       }, 50)
@@ -159,14 +173,14 @@ const CodeShare = () => {
 
   // Sync files to Firestore
   const syncFilesToFirestore = useCallback(
-    async (newFiles) => {
+    debounce(async (newFiles) => {
       const roomDocRef = doc(db, "codeRooms", roomId);
       try {
         await setDoc(roomDocRef, { files: newFiles }, { merge: true });
       } catch (error) {
-        toast.error("Failed to sync files: " + error.message);
+        toast.error("Sync failed: " + error.message);
       }
-    },
+    }, 300),
     [roomId]
   );
 
@@ -177,7 +191,7 @@ const CodeShare = () => {
       setFiles(updatedFiles);
       socket.emit("code_update", { roomId, code: updatedFiles });
       syncFilesToFirestore(updatedFiles);
-    }, 100),
+    }, 150),
     [socket, roomId, selectedFile, files, syncFilesToFirestore]
   );
 
@@ -201,10 +215,10 @@ const CodeShare = () => {
     return tree;
   }, [files]);
 
-  // AI code generation supporting Java, Python, and other languages
+  // Enhanced AI code generation with Python-specific support
   const generateCodeWithAI = useCallback(async () => {
     if (!aiPrompt.trim()) {
-      toast.error("Enter a prompt");
+      toast.error("Please enter a valid prompt");
       return;
     }
     setIsAILoading(true);
@@ -217,7 +231,17 @@ const CodeShare = () => {
             {
               parts: [
                 {
-                  text: `You are an expert developer. Generate clean, functional code with NO comments for any programming language (Python, Java, PHP, HTML, CSS, JavaScript, etc.). Structure with "// FILENAME: <filename>" (e.g., "// FILENAME: src/main.py" or "// FILENAME: app.java"). Use proper extensions (.py, .java, .php, .html, .css, .js, etc.) and folder structures. Ensure code is complete and syntactically correct. Request: ${aiPrompt}`,
+                  text: `
+                    You are an expert developer proficient in all programming languages, with a special focus on Python (e.g., Streamlit, Flask, array operations, etc.), JavaScript (e.g., React, Node.js), Java, PHP, and more.
+                    Generate a complete, functional codebase for the following request: "${aiPrompt}".
+                    - Structure the output with "// FILENAME: <path/to/file>" (e.g., "// FILENAME: app.py" or "// FILENAME: src/App.js").
+                    - Use proper file extensions (.py, .js, .java, .php, .html, .css, etc.).
+                    - Include all necessary files for a fully working application or script (e.g., requirements.txt for Python, package.json for Node.js).
+                    - Ensure the code is clean, syntactically correct, and production-ready with NO comments except the FILENAME markers.
+                    - Support folder structures for larger projects (e.g., Python Streamlit apps, React apps, Java packages).
+                    - For Python-specific requests (e.g., Streamlit projects, array operations), include appropriate libraries and idiomatic code.
+                    - If the prompt implies a full app, include all components (e.g., frontend, backend, database setup if applicable).
+                  `,
                 },
               ],
             },
@@ -226,13 +250,13 @@ const CodeShare = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`AI API failed with status: ${response.status}`);
+        throw new Error(`AI API error: ${response.status}`);
       }
 
       const data = await response.json();
       const generatedCode = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!generatedCode) {
-        throw new Error("No code generated by AI");
+        throw new Error("No code generated");
       }
 
       const fileRegex =
@@ -251,25 +275,31 @@ const CodeShare = () => {
         throw new Error("No valid files generated");
       }
 
-      setFiles(newFiles);
+      const updatedFiles = { ...files, ...newFiles };
+      setFiles(updatedFiles);
       setSelectedFile(Object.keys(newFiles)[0]);
-      socket?.emit("code_update", { roomId, code: newFiles });
-      await syncFilesToFirestore(newFiles);
+      socket?.emit("code_update", { roomId, code: updatedFiles });
+      await syncFilesToFirestore(updatedFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
     } catch (error) {
-      console.error("Error in generateCodeWithAI:", error);
+      console.error("AI Generation Error:", error);
       toast.error(error.message || "Failed to generate code");
     } finally {
       setIsAILoading(false);
       setAiPrompt("");
     }
-  }, [aiPrompt, socket, roomId, syncFilesToFirestore]);
+  }, [aiPrompt, socket, roomId, files, syncFilesToFirestore]);
 
   const addNewFile = useCallback(() => {
     const newPath = prompt("Enter file path (e.g., src/main.py):")?.trim();
-    if (!newPath || !/\.\w+$/.test(newPath))
-      return toast.error("Invalid file name");
-    if (files[newPath]) return toast.error("File exists");
+    if (!newPath || !/\.\w+$/.test(newPath)) {
+      toast.error("Invalid file path (must include extension)");
+      return;
+    }
+    if (files[newPath]) {
+      toast.error("File already exists");
+      return;
+    }
     const updatedFiles = { ...files, [newPath]: "" };
     setFiles(updatedFiles);
     setSelectedFile(newPath);
@@ -277,30 +307,45 @@ const CodeShare = () => {
     syncFilesToFirestore(updatedFiles);
   }, [files, socket, roomId, syncFilesToFirestore]);
 
+  const deleteFile = useCallback(
+    (path) => {
+      if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
+      const updatedFiles = { ...files };
+      delete updatedFiles[path];
+      setFiles(updatedFiles);
+      if (selectedFile === path) setSelectedFile(null);
+      socket?.emit("code_update", { roomId, code: updatedFiles });
+      syncFilesToFirestore(updatedFiles);
+      toast.success(`Deleted ${path}`);
+    },
+    [files, selectedFile, socket, roomId, syncFilesToFirestore]
+  );
+
   const deleteAllFiles = useCallback(async () => {
-    if (!window.confirm("Delete all files? This action cannot be undone."))
-      return;
+    if (!window.confirm("Are you sure you want to delete all files?")) return;
     const emptyFiles = {};
     setFiles(emptyFiles);
     setSelectedFile(null);
     setExpandedFolders(new Set());
-    if (socket) {
-      socket.emit("code_update", { roomId, code: emptyFiles });
-    }
+    socket?.emit("code_update", { roomId, code: emptyFiles });
     await syncFilesToFirestore(emptyFiles);
     toast.success("All files deleted");
   }, [socket, roomId, syncFilesToFirestore]);
 
   const downloadCode = useCallback(async () => {
+    if (!Object.keys(files).length) {
+      toast.error("No files to download");
+      return;
+    }
     const zip = new JSZip();
     Object.entries(files).forEach(([path, content]) => zip.file(path, content));
     const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, `CodeRoom_${roomId}.zip`);
-    toast.success("Downloaded");
+    saveAs(content, `CodeRoom_${roomId}_${Date.now()}.zip`);
+    toast.success("Project downloaded");
   }, [files, roomId]);
 
   const importFolder = useCallback(async () => {
-    const loadingToast = toast.loading("Importing...");
+    const loadingToast = toast.loading("Importing files...");
     try {
       const newFiles = {};
       if ("showDirectoryPicker" in window) {
@@ -308,10 +353,11 @@ const CodeShare = () => {
         const readDirectory = async (handle, basePath = "") => {
           for await (const entry of handle.values()) {
             const path = `${basePath}${entry.name}`;
-            if (entry.kind === "file")
+            if (entry.kind === "file") {
               newFiles[path] = await (await entry.getFile()).text();
-            else if (entry.kind === "directory")
+            } else if (entry.kind === "directory") {
               await readDirectory(entry, `${path}/`);
+            }
           }
         };
         await readDirectory(dirHandle);
@@ -323,11 +369,10 @@ const CodeShare = () => {
         await new Promise((resolve) => {
           input.onchange = async (e) => {
             await Promise.all(
-              Array.from(e.target.files).map(
-                async (file) =>
-                  (newFiles[file.webkitRelativePath || file.name] =
-                    await file.text())
-              )
+              Array.from(e.target.files).map(async (file) => {
+                newFiles[file.webkitRelativePath || file.name] =
+                  await file.text();
+              })
             );
             resolve();
           };
@@ -335,7 +380,9 @@ const CodeShare = () => {
         });
       }
 
-      if (!Object.keys(newFiles).length) throw new Error("No files imported");
+      if (!Object.keys(newFiles).length) {
+        throw new Error("No files imported");
+      }
       const updatedFiles = { ...files, ...newFiles };
       setFiles(updatedFiles);
       setSelectedFile(Object.keys(newFiles)[0]);
@@ -343,7 +390,7 @@ const CodeShare = () => {
       await syncFilesToFirestore(updatedFiles);
       toast.success(`Imported ${Object.keys(newFiles).length} files`);
     } catch (error) {
-      toast.error(error.message || "Import failed");
+      toast.error(error.message || "Failed to import files");
     } finally {
       toast.dismiss(loadingToast);
     }
@@ -357,33 +404,35 @@ const CodeShare = () => {
     });
   }, []);
 
-  // Language detection for Java, Python, and others
-  const getEditorLanguage = (fileName) => {
-    if (!fileName) return 'plaintext';
-    const extension = fileName.split('.').pop().toLowerCase();
+  const getEditorLanguage = useCallback((fileName) => {
+    if (!fileName) return "plaintext";
+    const extension = fileName.split(".").pop().toLowerCase();
     const languageMap = {
-      'js': 'javascript',
-      'jsx': 'javascript',
-      'ts': 'typescript',
-      'tsx': 'typescript',
-      'py': 'python',    // Python support
-      'java': 'java',    // Java support
-      'php': 'php',
-      'html': 'html',
-      'css': 'css',
-      'json': 'json',
-      'md': 'markdown',
-      'sql': 'sql',
-      'cpp': 'cpp',
-      'c': 'c',
-      'cs': 'csharp',
-      'rb': 'ruby',
-      'go': 'go',
-      'rs': 'rust',
-      // Add more extensions as needed
+      js: "javascript",
+      jsx: "javascript",
+      ts: "typescript",
+      tsx: "typescript",
+      py: "python",
+      java: "java",
+      php: "php",
+      html: "html",
+      css: "css",
+      json: "json",
+      md: "markdown",
+      sql: "sql",
+      cpp: "cpp",
+      c: "c",
+      cs: "csharp",
+      rb: "ruby",
+      go: "go",
+      rs: "rust",
+      sh: "shell",
+      yaml: "yaml",
+      yml: "yaml",
+      xml: "xml",
     };
-    return languageMap[extension] || 'plaintext';
-  };
+    return languageMap[extension] || "plaintext";
+  }, []);
 
   const editorOptions = useMemo(
     () => ({
@@ -398,6 +447,8 @@ const CodeShare = () => {
       smoothScrolling: true,
       formatOnType: true,
       formatOnPaste: true,
+      tabSize: 2,
+      automaticLayout: true,
     }),
     []
   );
@@ -423,9 +474,10 @@ const CodeShare = () => {
               type="text"
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="e.g., 'Python web scraper' or 'Java REST API'"
+              placeholder="e.g., 'Python Streamlit dashboard' or 'Array operations in Python' or 'React app'"
               className="flex-1 px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-700 focus:ring-1 focus:ring-blue-500 focus:border-transparent outline-none text-sm placeholder-gray-400"
               disabled={isAILoading}
+              onKeyPress={(e) => e.key === "Enter" && generateCodeWithAI()}
             />
             <button
               onClick={generateCodeWithAI}
@@ -438,7 +490,7 @@ const CodeShare = () => {
                 </>
               ) : (
                 <>
-                  <span>🤖</span> Generate
+                  <span>🤖</span> Generate Code
                 </>
               )}
             </button>
@@ -448,7 +500,9 @@ const CodeShare = () => {
         <div className="flex flex-1 gap-4 overflow-hidden">
           <aside className="w-64 bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex flex-col">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-gray-800">Files</h3>
+              <h3 className="text-sm font-medium text-gray-800">
+                Project Files
+              </h3>
               <div className="flex gap-2">
                 <button
                   onClick={addNewFile}
@@ -467,7 +521,7 @@ const CodeShare = () => {
                 <button
                   onClick={downloadCode}
                   className="p-2 text-gray-600 hover:bg-gray-100 rounded-md"
-                  title="Download All"
+                  title="Download Project"
                 >
                   <FiDownload size={18} />
                 </button>
@@ -476,7 +530,7 @@ const CodeShare = () => {
             <div className="flex-1 overflow-y-auto">
               {Object.keys(files).length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-2">
-                  No files
+                  No files yet. Add or generate some!
                 </p>
               ) : (
                 <FileTree
@@ -485,6 +539,7 @@ const CodeShare = () => {
                   onSelectFile={setSelectedFile}
                   expandedFolders={expandedFolders}
                   toggleFolder={toggleFolder}
+                  onDeleteFile={deleteFile}
                 />
               )}
             </div>
@@ -494,7 +549,7 @@ const CodeShare = () => {
             {selectedFile && files[selectedFile] !== undefined ? (
               <>
                 <div className="flex items-center justify-between p-2 bg-gray-50 border-b border-gray-200">
-                  <span className="text-xs text-gray-600 truncate">
+                  <span className="text-xs text-gray-600 truncate max-w-[50%]">
                     <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">
                       {selectedFile}
                     </span>
@@ -502,22 +557,22 @@ const CodeShare = () => {
                   <div className="flex gap-2">
                     <button
                       onClick={addNewFile}
-                      className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 text-base font-medium"
+                      className="px-4 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 text-sm font-medium"
                     >
-                      New
+                      New File
                     </button>
                     <button
                       onClick={downloadCode}
-                      className="px-4 py-2 bg-purple-50 text-purple-600 rounded-md hover:bg-purple-100 text-base font-medium"
+                      className="px-4 py-1 bg-purple-50 text-purple-600 rounded-md hover:bg-purple-100 text-sm font-medium"
                     >
-                      Download
+                      Download All
                     </button>
                     <button
                       onClick={deleteAllFiles}
-                      className="px-4 py-2 bg-red-50 text-red-600 rounded-md hover:bg-red-100 text-base font-medium"
+                      className="px-4 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 text-sm font-medium"
                       title="Delete All Files"
                     >
-                      Delete
+                      <FiTrash2 size={16} />
                     </button>
                   </div>
                 </div>
@@ -530,14 +585,14 @@ const CodeShare = () => {
                   onChange={handleEditorChange}
                   loading={
                     <div className="flex items-center justify-center h-full text-gray-500">
-                      Loading...
+                      Loading Editor...
                     </div>
                   }
                 />
               </>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                Select a file or generate code
+                Select a file or generate a project to start coding
               </div>
             )}
           </main>
