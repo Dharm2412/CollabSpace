@@ -15,6 +15,8 @@ import {
   FiTrash2,
   FiPlus,
   FiCode,
+  FiPlay,
+  FiX,
 } from "react-icons/fi";
 import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
@@ -22,10 +24,11 @@ import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
 const SOCKET_URL = "http://localhost:3001";
-const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM"; // Replace with your actual API key
+const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
+// FileTree Component (for displaying the file structure)
 const FileTree = memo(
   ({
     data,
@@ -104,6 +107,7 @@ const FileTree = memo(
   )
 );
 
+// Main CodeShare Component
 const CodeShare = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
@@ -116,7 +120,11 @@ const CodeShare = () => {
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [username] = useState(localStorage.getItem("username") || "Anonymous");
 
-  // Firestore Sync
+  // Console feature state
+  const [consoleOutput, setConsoleOutput] = useState([]);
+  const [isConsoleVisible, setIsConsoleVisible] = useState(false);
+
+  // Firestore Synchronization
   useEffect(() => {
     const roomDocRef = doc(db, "codeRooms", roomId);
     const unsubscribe = onSnapshot(
@@ -184,6 +192,7 @@ const CodeShare = () => {
     [roomId]
   );
 
+  // Handle editor changes
   const handleEditorChange = useCallback(
     debounce((value) => {
       if (!socket || !selectedFile || value === files[selectedFile]) return;
@@ -195,6 +204,7 @@ const CodeShare = () => {
     [socket, roomId, selectedFile, files, syncFilesToFirestore]
   );
 
+  // Compute file tree structure
   const fileTree = useMemo(() => {
     const tree = {};
     Object.keys(files).forEach((path) => {
@@ -215,7 +225,67 @@ const CodeShare = () => {
     return tree;
   }, [files]);
 
-  // Enhanced AI code generation with Python-specific support
+  // Run JavaScript code and capture console output
+  const handleRunCode = useCallback(() => {
+    if (!selectedFile) {
+      toast.error("No file selected");
+      return;
+    }
+    const language = getEditorLanguage(selectedFile);
+    if (language !== "javascript") {
+      toast.error("Only JavaScript is supported for now");
+      return;
+    }
+    const code = files[selectedFile];
+    const timestamp = new Date().toLocaleTimeString();
+    setConsoleOutput((prev) => [
+      ...prev,
+      { type: "info", message: `----- Run at ${timestamp} -----` },
+    ]);
+    setIsConsoleVisible(true);
+
+    const originalLog = console.log;
+    const originalError = console.error;
+    console.log = (...args) => {
+      setConsoleOutput((prev) => [
+        ...prev,
+        { type: "log", message: args.join(" ") },
+      ]);
+      originalLog(...args);
+    };
+    console.error = (...args) => {
+      setConsoleOutput((prev) => [
+        ...prev,
+        { type: "error", message: args.join(" ") },
+      ]);
+      originalError(...args);
+    };
+
+    try {
+      eval(code);
+    } catch (error) {
+      setConsoleOutput((prev) => [
+        ...prev,
+        { type: "error", message: `Execution Error: ${error.message}` },
+      ]);
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+    }
+  }, [selectedFile, files]);
+
+  // Keyboard shortcut for running code (Ctrl+Enter)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        handleRunCode();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleRunCode]);
+
+  // AI Code Generation
   const generateCodeWithAI = useCallback(async () => {
     if (!aiPrompt.trim()) {
       toast.error("Please enter a valid prompt");
@@ -232,15 +302,15 @@ const CodeShare = () => {
               parts: [
                 {
                   text: `
-                    You are an expert developer proficient in all programming languages, with a special focus on Python (e.g., Streamlit, Flask, array operations, etc.), JavaScript (e.g., React, Node.js), Java, PHP, and more.
+                    You are an expert developer proficient in all programming languages.
                     Generate a complete, functional codebase for the following request: "${aiPrompt}".
-                    - Structure the output with "// FILENAME: <path/to/file>" (e.g., "// FILENAME: app.py" or "// FILENAME: src/App.js").
-                    - Use proper file extensions (.py, .js, .java, .php, .html, .css, etc.).
-                    - Include all necessary files for a fully working application or script (e.g., requirements.txt for Python, package.json for Node.js).
-                    - Ensure the code is clean, syntactically correct, and production-ready with NO comments except the FILENAME markers.
-                    - Support folder structures for larger projects (e.g., Python Streamlit apps, React apps, Java packages).
-                    - For Python-specific requests (e.g., Streamlit projects, array operations), include appropriate libraries and idiomatic code.
-                    - If the prompt implies a full app, include all components (e.g., frontend, backend, database setup if applicable).
+                    - Structure the output with "// FILENAME: <path/to/file>" (e.g., "// FILENAME: src/main.js").
+                    - Always include a "// FILENAME: main.js" as the entry point file.
+                    - Use proper file extensions (.js, .py, etc.).
+                    - Include all necessary files for a fully working application.
+                    - Ensure the code is clean, syntactically correct, and production-ready with NO comments except FILENAME markers.
+                    - Support folder structures for larger projects.
+                    - If no specific language is mentioned, default to JavaScript with main.js as entry point.
                   `,
                 },
               ],
@@ -271,15 +341,18 @@ const CodeShare = () => {
         }
       }
 
+      if (!newFiles["main.js"]) {
+        newFiles["main.js"] = "console.log('Hello from main.js');";
+      }
+
       if (!Object.keys(newFiles).length) {
         throw new Error("No valid files generated");
       }
 
-      const updatedFiles = { ...files, ...newFiles };
-      setFiles(updatedFiles);
-      setSelectedFile(Object.keys(newFiles)[0]);
-      socket?.emit("code_update", { roomId, code: updatedFiles });
-      await syncFilesToFirestore(updatedFiles);
+      setFiles(newFiles);
+      setSelectedFile("main.js");
+      socket?.emit("code_update", { roomId, code: newFiles });
+      await syncFilesToFirestore(newFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
     } catch (error) {
       console.error("AI Generation Error:", error);
@@ -288,10 +361,11 @@ const CodeShare = () => {
       setIsAILoading(false);
       setAiPrompt("");
     }
-  }, [aiPrompt, socket, roomId, files, syncFilesToFirestore]);
+  }, [aiPrompt, socket, roomId, syncFilesToFirestore]);
 
+  // Add a new file
   const addNewFile = useCallback(() => {
-    const newPath = prompt("Enter file path (e.g., src/main.py):")?.trim();
+    const newPath = prompt("Enter file path (e.g., src/main.js):")?.trim();
     if (!newPath || !/\.\w+$/.test(newPath)) {
       toast.error("Invalid file path (must include extension)");
       return;
@@ -307,6 +381,7 @@ const CodeShare = () => {
     syncFilesToFirestore(updatedFiles);
   }, [files, socket, roomId, syncFilesToFirestore]);
 
+  // Delete a file
   const deleteFile = useCallback(
     (path) => {
       if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
@@ -321,6 +396,7 @@ const CodeShare = () => {
     [files, selectedFile, socket, roomId, syncFilesToFirestore]
   );
 
+  // Delete all files
   const deleteAllFiles = useCallback(async () => {
     if (!window.confirm("Are you sure you want to delete all files?")) return;
     const emptyFiles = {};
@@ -332,18 +408,26 @@ const CodeShare = () => {
     toast.success("All files deleted");
   }, [socket, roomId, syncFilesToFirestore]);
 
+  // Download project as ZIP
   const downloadCode = useCallback(async () => {
     if (!Object.keys(files).length) {
       toast.error("No files to download");
       return;
     }
     const zip = new JSZip();
-    Object.entries(files).forEach(([path, content]) => zip.file(path, content));
+    const filesToDownload = { ...files };
+    if (!filesToDownload["main.js"]) {
+      filesToDownload["main.js"] = "console.log('Hello from main.js');";
+    }
+    Object.entries(filesToDownload).forEach(([path, content]) =>
+      zip.file(path, content)
+    );
     const content = await zip.generateAsync({ type: "blob" });
     saveAs(content, `CodeRoom_${roomId}_${Date.now()}.zip`);
     toast.success("Project downloaded");
   }, [files, roomId]);
 
+  // Import folder/files
   const importFolder = useCallback(async () => {
     const loadingToast = toast.loading("Importing files...");
     try {
@@ -396,6 +480,7 @@ const CodeShare = () => {
     }
   }, [files, socket, roomId, syncFilesToFirestore]);
 
+  // Toggle folder expansion
   const toggleFolder = useCallback((path) => {
     setExpandedFolders((prev) => {
       const newSet = new Set(prev);
@@ -404,6 +489,7 @@ const CodeShare = () => {
     });
   }, []);
 
+  // Determine editor language based on file extension
   const getEditorLanguage = useCallback((fileName) => {
     if (!fileName) return "plaintext";
     const extension = fileName.split(".").pop().toLowerCase();
@@ -434,6 +520,7 @@ const CodeShare = () => {
     return languageMap[extension] || "plaintext";
   }, []);
 
+  // Editor options
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
@@ -453,6 +540,7 @@ const CodeShare = () => {
     []
   );
 
+  // Loading state
   if (!socket) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100">
@@ -461,6 +549,7 @@ const CodeShare = () => {
     );
   }
 
+  // Main UI
   return (
     <div className="flex h-screen bg-gray-100 font-sans antialiased">
       <RoomSidebar roomId={roomId} users={users} />
@@ -474,7 +563,7 @@ const CodeShare = () => {
               type="text"
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="e.g., 'Python Streamlit dashboard' or 'Array operations in Python' or 'React app'"
+              placeholder="e.g., 'Create a simple React application'"
               className="flex-1 px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-700 focus:ring-1 focus:ring-blue-500 focus:border-transparent outline-none text-sm placeholder-gray-400"
               disabled={isAILoading}
               onKeyPress={(e) => e.key === "Enter" && generateCodeWithAI()}
@@ -556,6 +645,14 @@ const CodeShare = () => {
                   </span>
                   <div className="flex gap-2">
                     <button
+                      onClick={handleRunCode}
+                      className="px-4 py-1 bg-green-50 text-green-600 rounded-md hover:bg-green-100 text-sm font-medium flex items-center gap-1"
+                      title="Run Code (Ctrl+Enter)"
+                    >
+                      <FiPlay size={16} />
+                      Run
+                    </button>
+                    <button
                       onClick={addNewFile}
                       className="px-4 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 text-sm font-medium"
                     >
@@ -576,19 +673,60 @@ const CodeShare = () => {
                     </button>
                   </div>
                 </div>
-                <Editor
-                  height="100%"
-                  language={getEditorLanguage(selectedFile)}
-                  theme="vs-dark"
-                  value={files[selectedFile] || ""}
-                  options={editorOptions}
-                  onChange={handleEditorChange}
-                  loading={
-                    <div className="flex items-center justify-center h-full text-gray-500">
-                      Loading Editor...
+                <div className="flex-1 relative">
+                  <Editor
+                    height="100%"
+                    language={getEditorLanguage(selectedFile)}
+                    theme="vs-dark"
+                    value={files[selectedFile] || ""}
+                    options={editorOptions}
+                    onChange={handleEditorChange}
+                    loading={
+                      <div className="flex items-center justify-center h-full text-gray-500">
+                        Loading Editor...
+                      </div>
+                    }
+                  />
+                  {isConsoleVisible && (
+                    <div className="absolute bottom-0 left-0 right-0 h-48 bg-gray-900 text-white p-2 overflow-auto">
+                      <div className="flex justify-between mb-2">
+                        <span className="text-sm font-medium">Console</span>
+                        <div>
+                          <button
+                            onClick={() => setConsoleOutput([])}
+                            className="mr-2 text-gray-400 hover:text-white"
+                            title="Clear Console"
+                          >
+                            <FiTrash2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => setIsConsoleVisible(false)}
+                            className="text-gray-400 hover:text-white"
+                            title="Close Console"
+                          >
+                            <FiX size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <pre className="text-sm">
+                        {consoleOutput.map((item, index) => (
+                          <div
+                            key={index}
+                            className={
+                              item.type === "error"
+                                ? "text-red-400"
+                                : item.type === "info"
+                                ? "text-gray-500"
+                                : "text-white"
+                            }
+                          >
+                            {item.message}
+                          </div>
+                        ))}
+                      </pre>
                     </div>
-                  }
-                />
+                  )}
+                </div>
               </>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500 text-sm">
