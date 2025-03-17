@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
   BrowserRouter as Router,
   Route,
@@ -6,6 +6,7 @@ import {
   Outlet,
   Navigate,
   useNavigate,
+  useLocation,
 } from "react-router-dom";
 import Home from "./Home";
 import Chat from "./Chat";
@@ -35,18 +36,24 @@ const MainLayout = () => (
 // PrivateRoute component to protect routes
 const PrivateRoute = ({ children }) => {
   const { currentUser, loading } = useAuth();
-  const navigate = useNavigate();
+  const location = useLocation();
+  const toastShown = useRef(false);
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
-  if (!currentUser) {
+  if (!currentUser && !toastShown.current) {
+    toastShown.current = true;
     toast.error("Please login first", {
-      duration: 3000,
-      position: "top-right",
+      id: 'auth-toast', // Unique ID prevents duplicate toasts
+      position: 'top-center'
     });
-    return <Navigate to="/login" replace />;
+    return <Navigate 
+      to="/login" 
+      replace 
+      state={{ from: location }}
+    />;
   }
 
   return children;
@@ -72,7 +79,7 @@ function App() {
   return (
     <div>
       <Toaster
-        position="top-right"
+        position="top-center"
         toastOptions={{
           duration: 3000,
           style: {
