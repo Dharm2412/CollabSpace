@@ -12,7 +12,7 @@ const io = new Server(server, {
 });
 
 // Updated room structure to store code as an object
-const rooms = new Map(); // roomId -> { messages: [], users: Set<string>, code: { [filename]: string } }
+const rooms = new Map(); // roomId -> { messages: [], users: Set<string>, code: { [filename]: string }, aiStatus: {} }
 
 const PORT = process.env.PORT || 3001;
 
@@ -75,11 +75,33 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("whiteboard-draw", { roomId, changes });
   });
 
-  socket.on("code_update", ({ roomId, code }) => {
+  socket.on("code_update", ({ roomId, code, metadata }) => {
     const room = rooms.get(roomId);
     if (room) {
-      room.code = code; // Store code as an object
-      io.to(roomId).emit("code_update", code); // Broadcast to all in room
+      room.code = code;
+      
+      // If this is AI-generated code, include metadata in broadcast
+      if (metadata?.type === "ai_generated") {
+        io.to(roomId).emit("code_update", code, metadata);
+      } else {
+        io.to(roomId).emit("code_update", code);
+      }
+    }
+  });
+
+  socket.on("ai_generation_status", ({ roomId, status, prompt, filesGenerated, error }) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.aiStatus = { status, prompt, filesGenerated, error, timestamp: Date.now() };
+      
+      // Broadcast AI status to all room members except sender
+      socket.to(roomId).emit("ai_generation_status", {
+        status,
+        prompt,
+        filesGenerated,
+        error,
+        username: socket.data.username
+      });
     }
   });
 
