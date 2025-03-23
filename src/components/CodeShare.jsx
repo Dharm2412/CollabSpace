@@ -14,7 +14,6 @@ import {
   FiUpload,
   FiTrash2,
   FiPlus,
-  FiCode,
   FiPlay,
   FiX,
 } from "react-icons/fi";
@@ -28,7 +27,7 @@ const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
-// FileTree Component (for displaying the file structure)
+// FileTree Component
 const FileTree = memo(
   ({
     data,
@@ -111,45 +110,24 @@ const FileTree = memo(
 const CodeShare = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const [files, setFiles] = useState({});
+  const [files, setFiles] = useState({ "main.js": "// Start coding here" });
   const [users, setUsers] = useState([]);
   const [socket, setSocket] = useState(null);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isAILoading, setIsAILoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFile, setSelectedFile] = useState("main.js");
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [username] = useState(localStorage.getItem("username") || "Anonymous");
-
-  // Console feature state
   const [consoleOutput, setConsoleOutput] = useState([]);
   const [isConsoleVisible, setIsConsoleVisible] = useState(false);
-
-  // Firestore Synchronization
-  useEffect(() => {
-    const roomDocRef = doc(db, "codeRooms", roomId);
-    const unsubscribe = onSnapshot(
-      roomDocRef,
-      (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data();
-          const newFiles = data.files || {};
-          setFiles(newFiles);
-          if (!selectedFile || !newFiles[selectedFile]) {
-            const firstFile = Object.keys(newFiles)[0];
-            setSelectedFile(firstFile || null);
-          }
-        } else {
-          setDoc(roomDocRef, { files: {} });
-        }
-      },
-      (error) => toast.error("Firestore sync failed: " + error.message)
-    );
-    return () => unsubscribe();
-  }, [roomId, selectedFile]);
+  const [cursorPositions, setCursorPositions] = useState({});
 
   // Socket.IO Connection
   useEffect(() => {
-    const newSocket = io(SOCKET_URL, { reconnectionAttempts: 5 });
+    const newSocket = io(SOCKET_URL, {
+      reconnectionAttempts: 5,
+      query: { roomId, username },
+    });
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
@@ -163,45 +141,92 @@ const CodeShare = () => {
     });
 
     newSocket.on("room-data", ({ users }) => setUsers(users));
-    newSocket.on(
-      "code_update",
-      debounce((newFiles) => {
-        setFiles((prev) =>
-          JSON.stringify(prev) === JSON.stringify(newFiles) ? prev : newFiles
-        );
-        if (!newFiles[selectedFile] && Object.keys(newFiles).length > 0) {
-          setSelectedFile(Object.keys(newFiles)[0]);
+
+    newSocket.on("code_update", ({ path, content, userId }) => {
+      setFiles((prevFiles) => {
+        if (content === null) {
+          const newFiles = { ...prevFiles };
+          delete newFiles[path];
+          return newFiles;
         }
-      }, 50)
-    );
+        if (prevFiles[path] === content) return prevFiles;
+        return { ...prevFiles, [path]: content };
+      });
+    });
+
+    newSocket.on("cursor_update", ({ userId, position, filePath }) => {
+      setCursorPositions((prev) => ({
+        ...prev,
+        [userId]: { position, filePath },
+      }));
+    });
+
     newSocket.on("user_list", setUsers);
 
     return () => newSocket.disconnect();
-  }, [roomId, username, navigate, selectedFile]);
+  }, [roomId, username, navigate]);
+
+  // Firestore Synchronization
+  useEffect(() => {
+    const roomDocRef = doc(db, "codeRooms", roomId);
+    const unsubscribe = onSnapshot(
+      roomDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const data = docSnapshot.data();
+          const newFiles = data.files || { "main.js": "// Start coding here" };
+          setFiles(newFiles);
+          setSelectedFile((prev) => prev || "main.js");
+        } else {
+          setDoc(roomDocRef, { files: { "main.js": "// Start coding here" } });
+        }
+      },
+      (error) => toast.error("Firestore sync failed: " + error.message)
+    );
+    return () => unsubscribe();
+  }, [roomId]);
 
   // Sync files to Firestore
   const syncFilesToFirestore = useCallback(
-    debounce(async (newFiles) => {
+    debounce(async (updatedFiles) => {
       const roomDocRef = doc(db, "codeRooms", roomId);
       try {
-        await setDoc(roomDocRef, { files: newFiles }, { merge: true });
+        await setDoc(roomDocRef, { files: updatedFiles }, { merge: false });
       } catch (error) {
         toast.error("Sync failed: " + error.message);
       }
-    }, 300),
+    }, 200),
     [roomId]
   );
 
   // Handle editor changes
   const handleEditorChange = useCallback(
-    debounce((value) => {
-      if (!socket || !selectedFile || value === files[selectedFile]) return;
-      const updatedFiles = { ...files, [selectedFile]: value || "" };
-      setFiles(updatedFiles);
-      socket.emit("code_update", { roomId, code: updatedFiles });
-      syncFilesToFirestore(updatedFiles);
-    }, 150),
+    (value, event) => {
+      if (!socket || !selectedFile) return;
+      const newFiles = { ...files, [selectedFile]: value || "" };
+      setFiles(newFiles);
+      socket.emit("code_update", {
+        roomId,
+        path: selectedFile,
+        content: value,
+        userId: socket.id,
+      });
+      syncFilesToFirestore(newFiles);
+    },
     [socket, roomId, selectedFile, files, syncFilesToFirestore]
+  );
+
+  // Handle cursor position updates
+  const handleCursorChange = useCallback(
+    (monacoEditor) => {
+      const position = monacoEditor.getPosition();
+      socket?.emit("cursor_update", {
+        roomId,
+        position,
+        filePath: selectedFile,
+      });
+    },
+    [socket, roomId, selectedFile]
   );
 
   // Compute file tree structure
@@ -225,7 +250,7 @@ const CodeShare = () => {
     return tree;
   }, [files]);
 
-  // Run JavaScript code and capture console output
+  // Run JavaScript code
   const handleRunCode = useCallback(() => {
     if (!selectedFile) {
       toast.error("No file selected");
@@ -274,7 +299,7 @@ const CodeShare = () => {
     }
   }, [selectedFile, files]);
 
-  // Keyboard shortcut for running code (Ctrl+Enter)
+  // Keyboard shortcut for running code
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -302,15 +327,13 @@ const CodeShare = () => {
               parts: [
                 {
                   text: `
-                    You are an expert developer proficient in all programming languages.
-                    Generate a complete, functional codebase for the following request: "${aiPrompt}".
-                    - Structure the output with "// FILENAME: <path/to/file>" (e.g., "// FILENAME: src/main.js").
-                    - Always include a "// FILENAME: main.js" as the entry point file.
-                    - Use proper file extensions (.js, .py, etc.).
-                    - Include all necessary files for a fully working application.
-                    - Ensure the code is clean, syntactically correct, and production-ready with NO comments except FILENAME markers.
-                    - Support folder structures for larger projects.
-                    - If no specific language is mentioned, default to JavaScript with main.js as entry point.
+                    Generate a complete, functional codebase for: "${aiPrompt}".
+                    - Use "// FILENAME: <path/to/file>" for each file.
+                    - Include "// FILENAME: main.js" as entry point.
+                    - Use proper file extensions.
+                    - Ensure production-ready code with no comments except FILENAME markers.
+                    - Default to JavaScript if no language specified.
+                    - If multiple files are generated, remove main.js from the final output.
                   `,
                 },
               ],
@@ -319,40 +342,35 @@ const CodeShare = () => {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`AI API error: ${response.status}`);
-      }
-
+      if (!response.ok) throw new Error(`AI API error: ${response.status}`);
       const data = await response.json();
       const generatedCode = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!generatedCode) {
-        throw new Error("No code generated");
-      }
+      if (!generatedCode) throw new Error("No code generated");
 
       const fileRegex =
-        /^\s*\/\/\s*FILENAME:\s*([^\s]+.*?)(?:\r\n|\n|\r)([\s\S]*?)(?=(^\s*\/\/\s*FILENAME:|\Z))/gim;
+        /\/\/\s*FILENAME:\s*([^\n]+)\n([\s\S]*?)(?=\/\/\s*FILENAME:|$)/g;
       const newFiles = {};
       let match;
       while ((match = fileRegex.exec(generatedCode)) !== null) {
-        const fullPath = match[1].trim();
+        const path = match[1].trim();
         const content = match[2].trim();
-        if (fullPath && content && /\.\w+$/.test(fullPath)) {
-          newFiles[fullPath] = content;
-        }
+        if (path && content) newFiles[path] = content;
       }
 
-      if (!newFiles["main.js"]) {
-        newFiles["main.js"] = "console.log('Hello from main.js');";
+      const updatedFiles = { ...files, ...newFiles };
+      if (newFiles["main.js"] && Object.keys(newFiles).length > 1) {
+        delete updatedFiles["main.js"];
       }
 
-      if (!Object.keys(newFiles).length) {
-        throw new Error("No valid files generated");
-      }
-
-      setFiles(newFiles);
-      setSelectedFile("main.js");
-      socket?.emit("code_update", { roomId, code: newFiles });
-      await syncFilesToFirestore(newFiles);
+      setFiles(updatedFiles);
+      const newSelectedFile = Object.keys(updatedFiles)[0];
+      setSelectedFile(newSelectedFile);
+      socket?.emit("code_update", {
+        roomId,
+        path: newSelectedFile,
+        content: updatedFiles[newSelectedFile],
+      });
+      syncFilesToFirestore(updatedFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
     } catch (error) {
       console.error("AI Generation Error:", error);
@@ -361,7 +379,7 @@ const CodeShare = () => {
       setIsAILoading(false);
       setAiPrompt("");
     }
-  }, [aiPrompt, socket, roomId, syncFilesToFirestore]);
+  }, [aiPrompt, socket, roomId, files, syncFilesToFirestore]);
 
   // Add a new file
   const addNewFile = useCallback(() => {
@@ -377,19 +395,29 @@ const CodeShare = () => {
     const updatedFiles = { ...files, [newPath]: "" };
     setFiles(updatedFiles);
     setSelectedFile(newPath);
-    socket?.emit("code_update", { roomId, code: updatedFiles });
+    socket?.emit("code_update", { roomId, path: newPath, content: "" });
     syncFilesToFirestore(updatedFiles);
   }, [files, socket, roomId, syncFilesToFirestore]);
 
-  // Delete a file
+  // Delete a file (Fixed)
   const deleteFile = useCallback(
     (path) => {
       if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
       const updatedFiles = { ...files };
       delete updatedFiles[path];
       setFiles(updatedFiles);
-      if (selectedFile === path) setSelectedFile(null);
-      socket?.emit("code_update", { roomId, code: updatedFiles });
+      if (selectedFile === path) {
+        const remainingFiles = Object.keys(updatedFiles);
+        setSelectedFile(remainingFiles.length > 0 ? remainingFiles[0] : null);
+      }
+      // Emit deletion to socket with null content to indicate removal
+      socket?.emit("code_update", {
+        roomId,
+        path,
+        content: null,
+        userId: socket.id,
+      });
+      // Sync the entire updated files object to Firestore
       syncFilesToFirestore(updatedFiles);
       toast.success(`Deleted ${path}`);
     },
@@ -399,14 +427,18 @@ const CodeShare = () => {
   // Delete all files
   const deleteAllFiles = useCallback(async () => {
     if (!window.confirm("Are you sure you want to delete all files?")) return;
-    const emptyFiles = {};
-    setFiles(emptyFiles);
-    setSelectedFile(null);
+    const updatedFiles = { "main.js": "// Start coding here" };
+    setFiles(updatedFiles);
+    setSelectedFile("main.js");
     setExpandedFolders(new Set());
-    socket?.emit("code_update", { roomId, code: emptyFiles });
-    await syncFilesToFirestore(emptyFiles);
-    toast.success("All files deleted");
-  }, [socket, roomId, syncFilesToFirestore]);
+    socket?.emit("code_update", {
+      roomId,
+      path: "main.js",
+      content: updatedFiles["main.js"],
+    });
+    await setDoc(doc(db, "codeRooms", roomId), { files: updatedFiles });
+    toast.success("All files reset");
+  }, [socket, roomId]);
 
   // Download project as ZIP
   const downloadCode = useCallback(async () => {
@@ -415,13 +447,7 @@ const CodeShare = () => {
       return;
     }
     const zip = new JSZip();
-    const filesToDownload = { ...files };
-    if (!filesToDownload["main.js"]) {
-      filesToDownload["main.js"] = "console.log('Hello from main.js');";
-    }
-    Object.entries(filesToDownload).forEach(([path, content]) =>
-      zip.file(path, content)
-    );
+    Object.entries(files).forEach(([path, content]) => zip.file(path, content));
     const content = await zip.generateAsync({ type: "blob" });
     saveAs(content, `CodeRoom_${roomId}_${Date.now()}.zip`);
     toast.success("Project downloaded");
@@ -469,8 +495,13 @@ const CodeShare = () => {
       }
       const updatedFiles = { ...files, ...newFiles };
       setFiles(updatedFiles);
-      setSelectedFile(Object.keys(newFiles)[0]);
-      socket?.emit("code_update", { roomId, code: updatedFiles });
+      const newSelectedFile = Object.keys(newFiles)[0];
+      setSelectedFile(newSelectedFile);
+      socket?.emit("code_update", {
+        roomId,
+        path: newSelectedFile,
+        content: newFiles[newSelectedFile],
+      });
       await syncFilesToFirestore(updatedFiles);
       toast.success(`Imported ${Object.keys(newFiles).length} files`);
     } catch (error) {
@@ -489,7 +520,7 @@ const CodeShare = () => {
     });
   }, []);
 
-  // Determine editor language based on file extension
+  // Determine editor language
   const getEditorLanguage = useCallback((fileName) => {
     if (!fileName) return "plaintext";
     const extension = fileName.split(".").pop().toLowerCase();
@@ -536,6 +567,8 @@ const CodeShare = () => {
       formatOnPaste: true,
       tabSize: 2,
       automaticLayout: true,
+      cursorBlinking: "smooth",
+      cursorSmoothCaretAnimation: true,
     }),
     []
   );
@@ -681,12 +714,31 @@ const CodeShare = () => {
                     value={files[selectedFile] || ""}
                     options={editorOptions}
                     onChange={handleEditorChange}
+                    onMount={(editor) => {
+                      editor.onDidChangeCursorPosition(() =>
+                        handleCursorChange(editor)
+                      );
+                    }}
                     loading={
                       <div className="flex items-center justify-center h-full text-gray-500">
                         Loading Editor...
                       </div>
                     }
                   />
+                  {Object.entries(cursorPositions).map(
+                    ([userId, { position, filePath }]) =>
+                      filePath === selectedFile &&
+                      position && (
+                        <div
+                          key={userId}
+                          className="absolute bg-blue-500 opacity-50 h-4 w-1 z-10"
+                          style={{
+                            top: `${position.lineNumber * 18}px`,
+                            left: `${position.column * 8}px`,
+                          }}
+                        />
+                      )
+                  )}
                   {isConsoleVisible && (
                     <div className="absolute bottom-0 left-0 right-0 h-48 bg-gray-900 text-white p-2 overflow-auto">
                       <div className="flex justify-between mb-2">
