@@ -4,7 +4,7 @@ const API_URL =
 export async function getAIResponse(message) {
   try {
     const response = await fetch(
-      `${API_URL}?key=${process.env.REACT_APP_GEMINI_API_KEY}`,
+      `${API_URL}?key=AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM`,
       {
         method: "POST",
         headers: {
