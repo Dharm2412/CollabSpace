@@ -11,7 +11,7 @@ const io = new Server(server, {
   },
 });
 
-// Updated room structure to store code as an object
+// Room structure: stores messages, users, code (as an object), and AI status
 const rooms = new Map(); // roomId -> { messages: [], users: Set<string>, code: { [filename]: string }, aiStatus: {} }
 
 const PORT = process.env.PORT || 3001;
@@ -19,19 +19,19 @@ const PORT = process.env.PORT || 3001;
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
-  // Store user's rooms and username
+  // Initialize socket data
   socket.data = {
     rooms: new Set(),
     username: null,
   };
 
   socket.on("join-room", async ({ roomId, username }) => {
-    // Initialize room if it doesn’t exist
+    // Initialize room if it doesn't exist
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         messages: [],
         users: new Set(),
-        code: { "main.js": "// Start coding here!\n" }, // Initialize with an object
+        code: { "main.js": "// Start coding here!\n" },
       });
     }
 
@@ -42,7 +42,7 @@ io.on("connection", (socket) => {
     socket.data.rooms.add(roomId);
     socket.join(roomId);
 
-    // Send existing room data including code object
+    // Send existing room data to the joining client
     socket.emit("room-data", {
       messages: room.messages,
       users: Array.from(room.users),
@@ -65,7 +65,6 @@ io.on("connection", (socket) => {
       id: Date.now(),
       timestamp: new Date().toISOString(),
     };
-
     room.messages.push(fullMessage);
     io.to(roomId).emit("receive-message", fullMessage);
   });
@@ -75,37 +74,44 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("whiteboard-draw", { roomId, changes });
   });
 
-  socket.on("code_update", ({ roomId, code, metadata }) => {
+  // Handle individual file updates
+  socket.on("code_update", ({ roomId, path, content }) => {
     const room = rooms.get(roomId);
     if (room) {
-      room.code = code;
-      
-      // If this is AI-generated code, include metadata in broadcast
-      if (metadata?.type === "ai_generated") {
-        io.to(roomId).emit("code_update", code, metadata);
+      if (content === null) {
+        delete room.code[path]; // Delete file if content is null
       } else {
-        io.to(roomId).emit("code_update", code);
+        room.code[path] = content; // Update or add file content
+      }
+      // Broadcast the update to all clients in the room
+      io.to(roomId).emit("code_update", { path, content });
+    }
+  });
+
+  socket.on(
+    "ai_generation_status",
+    ({ roomId, status, prompt, filesGenerated, error }) => {
+      const room = rooms.get(roomId);
+      if (room) {
+        room.aiStatus = {
+          status,
+          prompt,
+          filesGenerated,
+          error,
+          timestamp: Date.now(),
+        };
+        // Broadcast AI status to all room members except sender
+        socket.to(roomId).emit("ai_generation_status", {
+          status,
+          prompt,
+          filesGenerated,
+          error,
+          username: socket.data.username,
+        });
       }
     }
-  });
+  );
 
-  socket.on("ai_generation_status", ({ roomId, status, prompt, filesGenerated, error }) => {
-    const room = rooms.get(roomId);
-    if (room) {
-      room.aiStatus = { status, prompt, filesGenerated, error, timestamp: Date.now() };
-      
-      // Broadcast AI status to all room members except sender
-      socket.to(roomId).emit("ai_generation_status", {
-        status,
-        prompt,
-        filesGenerated,
-        error,
-        username: socket.data.username
-      });
-    }
-  });
-
-  // Handle request for full room data (useful for page navigation)
   socket.on("request-room-data", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (room) {
@@ -123,12 +129,10 @@ io.on("connection", (socket) => {
       const room = rooms.get(roomId);
       if (room) {
         room.users.delete(socket.data.username);
-
         socket.to(roomId).emit("user-left", {
           username: socket.data.username,
           message: `${socket.data.username} has left the room`,
         });
-
         if (room.users.size === 0) {
           rooms.delete(roomId); // Cleanup empty rooms
         }

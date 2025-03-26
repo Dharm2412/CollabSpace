@@ -142,7 +142,7 @@ const CodeShare = () => {
 
     newSocket.on("room-data", ({ users }) => setUsers(users));
 
-    newSocket.on("code_update", ({ path, content, userId }) => {
+    newSocket.on("code_update", ({ path, content }) => {
       setFiles((prevFiles) => {
         if (content === null) {
           const newFiles = { ...prevFiles };
@@ -209,7 +209,6 @@ const CodeShare = () => {
         roomId,
         path: selectedFile,
         content: value,
-        userId: socket.id,
       });
       syncFilesToFirestore(newFiles);
     },
@@ -318,6 +317,13 @@ const CodeShare = () => {
     }
     setIsAILoading(true);
     try {
+      // Notify others that AI generation is starting
+      socket?.emit("ai_generation_status", {
+        roomId,
+        status: "generating",
+        prompt: aiPrompt,
+      });
+
       const response = await fetch(`${AI_API_URL}?key=${API_KEY}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -363,18 +369,31 @@ const CodeShare = () => {
       }
 
       setFiles(updatedFiles);
-      const newSelectedFile = Object.keys(updatedFiles)[0];
-      setSelectedFile(newSelectedFile);
-      socket?.emit("code_update", {
-        roomId,
-        path: newSelectedFile,
-        content: updatedFiles[newSelectedFile],
+      // Emit code_update for each new file
+      Object.entries(newFiles).forEach(([path, content]) => {
+        socket?.emit("code_update", { roomId, path, content });
       });
+      const newSelectedFile = Object.keys(newFiles)[0];
+      setSelectedFile(newSelectedFile);
       syncFilesToFirestore(updatedFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
+
+      // Notify others that AI generation is completed
+      socket?.emit("ai_generation_status", {
+        roomId,
+        status: "completed",
+        prompt: aiPrompt,
+        filesGenerated: Object.keys(newFiles),
+      });
     } catch (error) {
       console.error("AI Generation Error:", error);
       toast.error(error.message || "Failed to generate code");
+      socket?.emit("ai_generation_status", {
+        roomId,
+        status: "error",
+        prompt: aiPrompt,
+        error: error.message,
+      });
     } finally {
       setIsAILoading(false);
       setAiPrompt("");
@@ -399,7 +418,7 @@ const CodeShare = () => {
     syncFilesToFirestore(updatedFiles);
   }, [files, socket, roomId, syncFilesToFirestore]);
 
-  // Delete a file (Fixed)
+  // Delete a file
   const deleteFile = useCallback(
     (path) => {
       if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
@@ -410,14 +429,7 @@ const CodeShare = () => {
         const remainingFiles = Object.keys(updatedFiles);
         setSelectedFile(remainingFiles.length > 0 ? remainingFiles[0] : null);
       }
-      // Emit deletion to socket with null content to indicate removal
-      socket?.emit("code_update", {
-        roomId,
-        path,
-        content: null,
-        userId: socket.id,
-      });
-      // Sync the entire updated files object to Firestore
+      socket?.emit("code_update", { roomId, path, content: null });
       syncFilesToFirestore(updatedFiles);
       toast.success(`Deleted ${path}`);
     },
@@ -495,13 +507,12 @@ const CodeShare = () => {
       }
       const updatedFiles = { ...files, ...newFiles };
       setFiles(updatedFiles);
+      // Emit code_update for each new file
+      Object.entries(newFiles).forEach(([path, content]) => {
+        socket?.emit("code_update", { roomId, path, content });
+      });
       const newSelectedFile = Object.keys(newFiles)[0];
       setSelectedFile(newSelectedFile);
-      socket?.emit("code_update", {
-        roomId,
-        path: newSelectedFile,
-        content: newFiles[newSelectedFile],
-      });
       await syncFilesToFirestore(updatedFiles);
       toast.success(`Imported ${Object.keys(newFiles).length} files`);
     } catch (error) {
