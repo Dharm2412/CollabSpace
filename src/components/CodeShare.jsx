@@ -22,7 +22,7 @@ import toast from "react-hot-toast";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
-const SOCKET_URL = "http://localhost:3001";
+const SOCKET_URL = "https://collabspace-1.onrender.com";
 const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
