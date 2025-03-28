@@ -26,8 +26,9 @@ const SOCKET_URL = "http://localhost:3001";
 const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+const MAX_CONSOLE_LINES = 1000; // Limit console output size
 
-// FileTree Component
+// FileTree Component (unchanged, already memoized)
 const FileTree = memo(
   ({
     data,
@@ -106,7 +107,6 @@ const FileTree = memo(
   )
 );
 
-// Main CodeShare Component
 const CodeShare = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
@@ -186,7 +186,7 @@ const CodeShare = () => {
     return () => unsubscribe();
   }, [roomId]);
 
-  // Sync files to Firestore
+  // Sync files to Firestore (already debounced at 200ms)
   const syncFilesToFirestore = useCallback(
     debounce(async (updatedFiles) => {
       const roomDocRef = doc(db, "codeRooms", roomId);
@@ -199,36 +199,51 @@ const CodeShare = () => {
     [roomId]
   );
 
-  // Handle editor changes
-  const handleEditorChange = useCallback(
-    (value, event) => {
-      if (!socket || !selectedFile) return;
-      const newFiles = { ...files, [selectedFile]: value || "" };
-      setFiles(newFiles);
-      socket.emit("code_update", {
-        roomId,
-        path: selectedFile,
-        content: value,
-      });
-      syncFilesToFirestore(newFiles);
-    },
-    [socket, roomId, selectedFile, files, syncFilesToFirestore]
+  // Debounced socket emission for code updates
+  const debouncedEmitCodeUpdate = useCallback(
+    debounce((path, content) => {
+      socket?.emit("code_update", { roomId, path, content });
+    }, 300),
+    [socket, roomId]
   );
 
-  // Handle cursor position updates
-  const handleCursorChange = useCallback(
-    (monacoEditor) => {
-      const position = monacoEditor.getPosition();
+  // Handle editor changes with debounced socket emission
+  const handleEditorChange = useCallback(
+    (value, event) => {
+      if (!selectedFile) return;
+      setFiles((prevFiles) => {
+        if (prevFiles[selectedFile] === value) return prevFiles;
+        const updatedFiles = { ...prevFiles, [selectedFile]: value || "" };
+        debouncedEmitCodeUpdate(selectedFile, value);
+        syncFilesToFirestore(updatedFiles);
+        return updatedFiles;
+      });
+    },
+    [selectedFile, debouncedEmitCodeUpdate, syncFilesToFirestore]
+  );
+
+  // Debounced socket emission for cursor updates
+  const debouncedEmitCursorUpdate = useCallback(
+    debounce((position) => {
       socket?.emit("cursor_update", {
         roomId,
         position,
         filePath: selectedFile,
       });
-    },
+    }, 100),
     [socket, roomId, selectedFile]
   );
 
-  // Compute file tree structure
+  // Handle cursor position updates with debounced emission
+  const handleCursorChange = useCallback(
+    (monacoEditor) => {
+      const position = monacoEditor.getPosition();
+      debouncedEmitCursorUpdate(position);
+    },
+    [debouncedEmitCursorUpdate]
+  );
+
+  // Compute file tree structure (already optimized with useMemo)
   const fileTree = useMemo(() => {
     const tree = {};
     Object.keys(files).forEach((path) => {
@@ -249,7 +264,7 @@ const CodeShare = () => {
     return tree;
   }, [files]);
 
-  // Run JavaScript code
+  // Run JavaScript code with console output limit
   const handleRunCode = useCallback(() => {
     if (!selectedFile) {
       toast.error("No file selected");
@@ -262,43 +277,57 @@ const CodeShare = () => {
     }
     const code = files[selectedFile];
     const timestamp = new Date().toLocaleTimeString();
-    setConsoleOutput((prev) => [
-      ...prev,
-      { type: "info", message: `----- Run at ${timestamp} -----` },
-    ]);
+    setConsoleOutput((prev) => {
+      const newOutput = [
+        ...prev,
+        { type: "info", message: `----- Run at ${timestamp} -----` },
+      ];
+      if (newOutput.length > MAX_CONSOLE_LINES) {
+        return newOutput.slice(-MAX_CONSOLE_LINES); // Keep last 1000 lines
+      }
+      return newOutput;
+    });
     setIsConsoleVisible(true);
 
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (...args) => {
-      setConsoleOutput((prev) => [
-        ...prev,
-        { type: "log", message: args.join(" ") },
-      ]);
-      originalLog(...args);
-    };
-    console.error = (...args) => {
-      setConsoleOutput((prev) => [
-        ...prev,
-        { type: "error", message: args.join(" ") },
-      ]);
-      originalError(...args);
-    };
+    console.log = (...args) =>
+      setConsoleOutput((prev) => {
+        const newOutput = [...prev, { type: "log", message: args.join(" ") }];
+        if (newOutput.length > MAX_CONSOLE_LINES) {
+          return newOutput.slice(-MAX_CONSOLE_LINES);
+        }
+        return newOutput;
+      });
+    console.error = (...args) =>
+      setConsoleOutput((prev) => {
+        const newOutput = [...prev, { type: "error", message: args.join(" ") }];
+        if (newOutput.length > MAX_CONSOLE_LINES) {
+          return newOutput.slice(-MAX_CONSOLE_LINES);
+        }
+        return newOutput;
+      });
 
     try {
       eval(code);
     } catch (error) {
-      setConsoleOutput((prev) => [
-        ...prev,
-        { type: "error", message: `Execution Error: ${error.message}` },
-      ]);
+      setConsoleOutput((prev) => {
+        const newOutput = [
+          ...prev,
+          { type: "error", message: `Execution Error: ${error.message}` },
+        ];
+        if (newOutput.length > MAX_CONSOLE_LINES) {
+          return newOutput.slice(-MAX_CONSOLE_LINES);
+        }
+        return newOutput;
+      });
     } finally {
       console.log = originalLog;
       console.error = originalError;
     }
   }, [selectedFile, files]);
 
-  // Keyboard shortcut for running code
+  // Keyboard shortcut for running code (unchanged)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
@@ -309,7 +338,7 @@ const CodeShare = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleRunCode]);
 
-  // AI Code Generation
+  // AI Code Generation (unchanged, already well-handled)
   const generateCodeWithAI = useCallback(async () => {
     if (!aiPrompt.trim()) {
       toast.error("Please enter a valid prompt");
@@ -317,7 +346,6 @@ const CodeShare = () => {
     }
     setIsAILoading(true);
     try {
-      // Notify others that AI generation is starting
       socket?.emit("ai_generation_status", {
         roomId,
         status: "generating",
@@ -369,7 +397,6 @@ const CodeShare = () => {
       }
 
       setFiles(updatedFiles);
-      // Emit code_update for each new file
       Object.entries(newFiles).forEach(([path, content]) => {
         socket?.emit("code_update", { roomId, path, content });
       });
@@ -378,7 +405,6 @@ const CodeShare = () => {
       syncFilesToFirestore(updatedFiles);
       toast.success(`Generated ${Object.keys(newFiles).length} files`);
 
-      // Notify others that AI generation is completed
       socket?.emit("ai_generation_status", {
         roomId,
         status: "completed",
@@ -400,7 +426,7 @@ const CodeShare = () => {
     }
   }, [aiPrompt, socket, roomId, files, syncFilesToFirestore]);
 
-  // Add a new file
+  // Add a new file (unchanged)
   const addNewFile = useCallback(() => {
     const newPath = prompt("Enter file path (e.g., src/main.js):")?.trim();
     if (!newPath || !/\.\w+$/.test(newPath)) {
@@ -418,7 +444,7 @@ const CodeShare = () => {
     syncFilesToFirestore(updatedFiles);
   }, [files, socket, roomId, syncFilesToFirestore]);
 
-  // Delete a file
+  // Delete a file (unchanged)
   const deleteFile = useCallback(
     (path) => {
       if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
@@ -436,7 +462,7 @@ const CodeShare = () => {
     [files, selectedFile, socket, roomId, syncFilesToFirestore]
   );
 
-  // Delete all files
+  // Delete all files (unchanged)
   const deleteAllFiles = useCallback(async () => {
     if (!window.confirm("Are you sure you want to delete all files?")) return;
     const updatedFiles = { "main.js": "// Start coding here" };
@@ -452,7 +478,7 @@ const CodeShare = () => {
     toast.success("All files reset");
   }, [socket, roomId]);
 
-  // Download project as ZIP
+  // Download project as ZIP (unchanged)
   const downloadCode = useCallback(async () => {
     if (!Object.keys(files).length) {
       toast.error("No files to download");
@@ -465,7 +491,7 @@ const CodeShare = () => {
     toast.success("Project downloaded");
   }, [files, roomId]);
 
-  // Import folder/files
+  // Import folder/files (unchanged)
   const importFolder = useCallback(async () => {
     const loadingToast = toast.loading("Importing files...");
     try {
@@ -507,7 +533,6 @@ const CodeShare = () => {
       }
       const updatedFiles = { ...files, ...newFiles };
       setFiles(updatedFiles);
-      // Emit code_update for each new file
       Object.entries(newFiles).forEach(([path, content]) => {
         socket?.emit("code_update", { roomId, path, content });
       });
@@ -522,7 +547,7 @@ const CodeShare = () => {
     }
   }, [files, socket, roomId, syncFilesToFirestore]);
 
-  // Toggle folder expansion
+  // Toggle folder expansion (unchanged)
   const toggleFolder = useCallback((path) => {
     setExpandedFolders((prev) => {
       const newSet = new Set(prev);
@@ -531,7 +556,7 @@ const CodeShare = () => {
     });
   }, []);
 
-  // Determine editor language
+  // Determine editor language (unchanged)
   const getEditorLanguage = useCallback((fileName) => {
     if (!fileName) return "plaintext";
     const extension = fileName.split(".").pop().toLowerCase();
@@ -562,7 +587,7 @@ const CodeShare = () => {
     return languageMap[extension] || "plaintext";
   }, []);
 
-  // Editor options
+  // Editor options (unchanged, already memoized)
   const editorOptions = useMemo(
     () => ({
       minimap: { enabled: false },
@@ -584,7 +609,7 @@ const CodeShare = () => {
     []
   );
 
-  // Loading state
+  // Loading state (unchanged)
   if (!socket) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-100">
@@ -593,7 +618,7 @@ const CodeShare = () => {
     );
   }
 
-  // Main UI
+  // Main UI (unchanged)
   return (
     <div className="flex h-screen bg-gray-100 font-sans antialiased">
       <RoomSidebar roomId={roomId} users={users} />

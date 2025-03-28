@@ -5,7 +5,7 @@ import "tldraw/tldraw.css";
 import RoomSidebar from "./RoomSidebar";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
-import AIImageGenerator from "./AIImageGenerator"; // Import the new component
+
 import toast from "react-hot-toast";
 
 export default function Whiteboard() {
@@ -73,8 +73,6 @@ export default function Whiteboard() {
     <div className="flex h-screen bg-white">
       <RoomSidebar roomId={roomId} users={users} />
       <div className="flex-1 bg-white">
-        <AIImageGenerator onImageGenerated={handleImageGenerated} />{" "}
-        {/* Add the AIImageGenerator component */}
         <Tldraw inferDarkMode={false} persistenceKey={roomId}>
           <EditorWrapper roomId={roomId} editorRef={editorRef} />
         </Tldraw>
