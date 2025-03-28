@@ -11,7 +11,7 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:3001'); // Update with your server URL
+    const newSocket = io('https://collabspace-1.onrender.com'); // Update with your server URL
     setSocket(newSocket);
 
     return () => newSocket.close();
