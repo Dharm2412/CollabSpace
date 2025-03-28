@@ -13,7 +13,7 @@ const io = new Server(server, {
 
 const rooms = new Map(); // roomId -> { messages: [], users: Set<string>, code: { [filename]: string }, aiStatus: {} }
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
