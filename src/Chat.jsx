@@ -9,6 +9,9 @@ import { ref, onValue, onDisconnect, set } from "firebase/database";
 import { rtdb } from "./firebase";
 import MediaCall from "./components/MediaCall";
 
+// Replace with your actual webhook URL for your AI agent
+const WEBHOOK_URL =
+  "https://dharm.app.n8n.cloud/webhook/0d13ae90-e612-407b-848b-bf4f45c94d24";
 const SESSION_KEY = "chat_session";
 
 const parseAIResponse = (text) => {
@@ -146,6 +149,7 @@ function Chat() {
   const [message, setMessage] = useState("");
   const [users, setUsers] = useState([]);
   const [isAILoading, setIsAILoading] = useState(false);
+  const [isAgentLoading, setIsAgentLoading] = useState(false);
   const [userId] = useState(
     JSON.parse(localStorage.getItem(SESSION_KEY))?.userId || crypto.randomUUID()
   );
@@ -293,22 +297,93 @@ function Chat() {
       setMessages(savedSession.messages || []);
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
     const trimmedMessage = message.trim();
     if (!trimmedMessage) return;
 
-    const newMessage = {
-      text: trimmedMessage,
-      sender: usernameRef.current,
-      timestamp: new Date().toISOString(),
-    };
+    if (trimmedMessage.startsWith("@ai")) {
+      const prompt = trimmedMessage.replace(/^@ai\s*/, "").trim();
+      if (!prompt) return;
 
-    socket.emit("send-message", {
-      roomId: roomIdRef.current,
-      message: newMessage,
-    });
-    setMessage("");
+      setIsAgentLoading(true);
+      const userMessage = {
+        id: Date.now() + Math.random().toString(36).substr(2, 9),
+        text: trimmedMessage,
+        sender: usernameRef.current,
+        timestamp: new Date().toISOString(),
+        isAgentRequest: true,
+      };
+      const loadingMessage = {
+        id: Date.now() + Math.random().toString(36).substr(2, 10),
+        text: "Waiting for AI Agent response...",
+        sender: "agent-loading",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMessage, loadingMessage]);
+
+      try {
+        const response = await fetch(WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            roomId: roomIdRef.current,
+            username: usernameRef.current,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `Webhook request failed: ${response.status} - ${errorText}`
+          );
+        }
+
+        const data = await response.json();
+        console.log("AI Agent Response:", data); // Log the full response to console
+
+        // Extract the 'output' field from the first element of the array
+        const agentText =
+          Array.isArray(data) && data.length > 0 && data[0].output
+            ? data[0].output
+            : "No valid response text received";
+
+        const agentChatMessage = {
+          id: Date.now() + Math.random().toString(36).substr(2, 9),
+          text: agentText,
+          sender: "ai-agent",
+          timestamp: new Date().toISOString(),
+        };
+        setMessages((prev) =>
+          prev
+            .filter((msg) => msg.sender !== "agent-loading")
+            .concat(agentChatMessage)
+        );
+        scrollToBottom();
+      } catch (error) {
+        console.error("Error fetching AI Agent response:", error);
+        toast.error(`Failed to get AI Agent response: ${error.message}`);
+        setMessages((prev) =>
+          prev.filter((msg) => msg.sender !== "agent-loading")
+        );
+      } finally {
+        setIsAgentLoading(false);
+        setMessage("");
+      }
+    } else {
+      const newMessage = {
+        text: trimmedMessage,
+        sender: usernameRef.current,
+        timestamp: new Date().toISOString(),
+      };
+
+      socket.emit("send-message", {
+        roomId: roomIdRef.current,
+        message: newMessage,
+      });
+      setMessage("");
+    }
   };
 
   const handleAIChat = async (e) => {
@@ -503,7 +578,7 @@ function Chat() {
         </div>
       </nav>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         <RoomSidebar roomId={roomId} users={users} onLeave={handleLeaveRoom} />
         <div className="flex-1 flex flex-col">
           <div
@@ -577,7 +652,10 @@ function Chat() {
               }
 
               const isAI = message.sender === "ai";
+              const isAgent = message.sender === "ai-agent";
               const isUser = message.sender === username;
+              const isAgentLoading = message.sender === "agent-loading";
+              const isAgentRequest = message.isAgentRequest;
 
               return (
                 <motion.div
@@ -586,42 +664,70 @@ function Chat() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
                   className={`max-w-2xl relative group ${
-                    isUser ? "ml-auto" : isAI ? "mr-auto" : "mr-auto"
+                    isUser || isAgentRequest ? "ml-auto" : "mr-auto"
                   }`}
                 >
                   <div
                     className={`p-4 rounded-2xl shadow-md border ${
-                      isUser
+                      isUser && !isAgentRequest
                         ? "bg-indigo-600 text-white border-indigo-700 rounded-br-none"
                         : isAI
                         ? "bg-gradient-to-r from-teal-50 to-teal-100 text-teal-900 border-teal-200 rounded-bl-none shadow-inner"
+                        : isAgent
+                        ? "bg-gradient-to-r from-orange-50 to-orange-100 text-orange-900 border-orange-200 rounded-bl-none shadow-inner"
+                        : isAgentLoading
+                        ? "bg-gray-100 text-gray-600 border-gray-200 rounded-bl-none animate-bounce"
+                        : isAgentRequest
+                        ? "bg-blue-500 text-white border-blue-600 rounded-br-none"
                         : "bg-white text-gray-800 border-gray-200 rounded-bl-none"
                     }`}
                   >
-                    {!isUser && message.sender && (
+                    {!isUser && !isAgentRequest && message.sender && (
                       <div className="flex items-center space-x-2 mb-3">
                         <div
                           className={`w-8 h-8 rounded-full flex items-center justify-center ${
                             isAI
                               ? "bg-teal-200 text-teal-700"
+                              : isAgent
+                              ? "bg-orange-200 text-orange-700"
+                              : isAgentLoading
+                              ? "bg-gray-200 text-gray-600 animate-spin"
                               : "bg-gray-200 text-gray-600"
                           }`}
                         >
                           <span className="text-sm font-semibold">
-                            {isAI ? "🤖" : message.sender[0].toUpperCase()}
+                            {isAI
+                              ? "🤖"
+                              : isAgent
+                              ? "🧠"
+                              : isAgentLoading
+                              ? "⌛"
+                              : message.sender[0].toUpperCase()}
                           </span>
                         </div>
                         <span
                           className={`text-sm font-medium ${
-                            isAI ? "text-teal-800" : "text-gray-700"
+                            isAI
+                              ? "text-teal-800"
+                              : isAgent
+                              ? "text-orange-800"
+                              : isAgentLoading
+                              ? "text-gray-600"
+                              : "text-gray-700"
                           }`}
                         >
-                          {isAI ? "AI Assistant" : message.sender}
+                          {isAI
+                            ? "AI Assistant"
+                            : isAgent
+                            ? "AI Agent"
+                            : isAgentLoading
+                            ? "AI Agent Processing"
+                            : message.sender}
                         </span>
                       </div>
                     )}
-                    <div className={isAI ? "space-y-2" : ""}>
-                      {isAI ? (
+                    <div className={isAI || isAgent ? "space-y-2" : ""}>
+                      {isAI || isAgent ? (
                         parseAIResponse(message.text)
                       ) : (
                         <p className="text-sm whitespace-pre-wrap leading-relaxed">
@@ -631,10 +737,16 @@ function Chat() {
                     </div>
                     <p
                       className={`text-xs mt-2 ${
-                        isUser
+                        isUser && !isAgentRequest
                           ? "text-indigo-200"
                           : isAI
                           ? "text-teal-600"
+                          : isAgent
+                          ? "text-orange-600"
+                          : isAgentLoading
+                          ? "text-gray-500"
+                          : isAgentRequest
+                          ? "text-blue-200"
                           : "text-gray-500"
                       }`}
                     >
@@ -660,13 +772,13 @@ function Chat() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50 text-gray-800 placeholder-gray-400"
-                placeholder="Type your message..."
-                disabled={isAILoading}
+                placeholder="Type your message or @ai for AI Agent..."
+                disabled={isAILoading || isAgentLoading}
               />
               <button
                 type="button"
                 onClick={handleAIChat}
-                disabled={isAILoading}
+                disabled={isAILoading || isAgentLoading}
                 className="px-6 py-3 bg-teal-600 text-white rounded-full hover:bg-teal-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-semibold flex items-center gap-2 shadow-md"
               >
                 {isAILoading ? (
@@ -701,14 +813,41 @@ function Chat() {
               </button>
               <button
                 type="submit"
-                className="px-6 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors font-semibold shadow-md"
+                className="px-6 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors font-semibold shadow-md disabled:bg-gray-400 disabled:cursor-not-allowed"
+                disabled={isAILoading || isAgentLoading}
               >
-                Send
+                {isAgentLoading ? (
+                  <>
+                    <svg
+                      className="w-5 h-5 animate-spin inline-block mr-2"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Sending to Agent...
+                  </>
+                ) : (
+                  "Send"
+                )}
               </button>
             </div>
           </form>
         </div>
       </div>
+
       {(isVideoCallActive || isAudioCallActive) && (
         <MediaCall
           roomId={roomId}
