@@ -15,6 +15,7 @@ import Pricing from "./pages/Pricing";
 import About from "./pages/About";
 import Features from "./pages/Features";
 import Contact from "./pages/Contact";
+import VideoCall from "./pages/VideoCall";
 import { Toaster, toast } from "react-hot-toast";
 import { SocketProvider } from "./context/SocketContext";
 import Login from "./pages/Login";
@@ -123,6 +124,14 @@ function App() {
           element={
             <PrivateRoute>
               <CodeShare />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/video-call/:roomId"
+          element={
+            <PrivateRoute>
+              <VideoCall />
             </PrivateRoute>
           }
         />
