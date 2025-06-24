@@ -1,7 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import React from 'react';
 
-export default function RoomSidebar({ roomId, users, onLeave, onVideoCall }) {
+export default function RoomSidebar({ roomId, users }) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -9,7 +9,7 @@ export default function RoomSidebar({ roomId, users, onLeave, onVideoCall }) {
     navigate(path, {
       state: { 
         prevPath: location.pathname,
-        rejoinRoom: true 
+        rejoinRoom: true
       }
     });
   };
@@ -50,7 +50,7 @@ export default function RoomSidebar({ roomId, users, onLeave, onVideoCall }) {
           {users.map((user, index) => (
             <li key={index} className="text-gray-600 truncate flex items-center gap-2">
               <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              {typeof user === 'string' ? user : user.username}
+              {typeof user === 'object' && user.username ? user.username : user}
             </li>
           ))}
         </ul>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { getAIResponse } from "./utils/gemini";
 import RoomSidebar from "./components/RoomSidebar";
@@ -7,6 +7,7 @@ import { toast } from "react-hot-toast";
 import { useSocket } from "./context/SocketContext";
 import { ref, onValue, onDisconnect, set } from "firebase/database";
 import { rtdb } from "./firebase";
+import CodeGenerator from "./components/CodeGenerator";
 
 
 // Replace with your actual webhook URL for your AI agent
@@ -137,11 +138,14 @@ const parseAIResponse = (text) => {
 function Chat() {
   const { roomId: urlRoomId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const socket = useSocket();
   const [step, setStep] = useState("join");
-  const [username, setUsername] = useState(
-    localStorage.getItem("username") || ""
-  );
+  const [username, setUsername] = useState(() => {
+    // First try to get username from saved session, then from localStorage
+    const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+    return savedSession.username || localStorage.getItem("username") || "";
+  });
   const [roomId, setRoomId] = useState(
     JSON.parse(localStorage.getItem(SESSION_KEY))?.roomId || ""
   );
@@ -150,13 +154,25 @@ function Chat() {
   const [users, setUsers] = useState([]);
   const [isAILoading, setIsAILoading] = useState(false);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
-  const [userId] = useState(
-    JSON.parse(localStorage.getItem(SESSION_KEY))?.userId || crypto.randomUUID()
-  );
+  const [showCodeGenerator, setShowCodeGenerator] = useState(false);
+  const [isNavigatingFromCodeShare, setIsNavigatingFromCodeShare] = useState(false);
+  const [userId] = useState(() => {
+    // Generate a consistent userId based on username and roomId
+    const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+    if (savedSession.userId) {
+      return savedSession.userId;
+    }
+    // Generate a new userId if none exists
+    return crypto.randomUUID();
+  });
 
   const messagesEndRef = useRef(null);
   const usernameRef = useRef(username);
   const roomIdRef = useRef(roomId);
+  const socketListenersSetRef = useRef(false);
+  const roomJoinedRef = useRef(false);
+  const currentRoomRef = useRef(null);
+  const isNavigatingFromCodeShareRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -168,16 +184,44 @@ function Chat() {
   }, [username, roomId]);
 
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (!socket || !roomId || (socketListenersSetRef.current && currentRoomRef.current === roomId)) return;
 
     const handleReceiveMessage = (newMessage) => {
-      setMessages((prev) => [...prev, newMessage]);
+      // Avoid adding duplicate messages if this is our own message
+      setMessages((prev) => {
+        // Check if this message is already in our state (by multiple criteria)
+        const isDuplicate = prev.some(
+          (msg) => {
+            // Check by ID first (most reliable)
+            if (msg.id && newMessage.id && msg.id === newMessage.id) {
+              return true;
+            }
+            
+            // Check by sender, text, and timestamp (within 2 seconds)
+            return msg.sender === newMessage.sender && 
+                   msg.text === newMessage.text &&
+                   Math.abs(new Date(msg.timestamp) - new Date(newMessage.timestamp)) < 2000;
+          }
+        );
+        
+        if (isDuplicate) {
+          return prev;
+        }
+        
+        return [...prev, newMessage];
+      });
       scrollToBottom();
     };
 
     const handleUserJoined = (user) => {
       setUsers((prev) => {
-        if (!prev.includes(user.username)) {
+        // Check if user already exists by userId
+        const userExists = prev.some(u => 
+          (typeof u === 'object' && u.userId === user.userId) || 
+          (typeof u === 'string' && u === user.username)
+        );
+        
+        if (!userExists) {
           setMessages((prevMessages) => [
             ...prevMessages,
             {
@@ -187,30 +231,62 @@ function Chat() {
               timestamp: new Date().toISOString(),
             },
           ]);
-          return [...prev, user.username];
+          // Store user as object with userId
+          return [...prev, { username: user.username, userId: user.userId }];
         }
         return prev;
       });
-      toast.success(`${user.username} joined the room`);
+      if (!isNavigatingFromCodeShareRef.current) {
+        toast.success(`${user.username} joined the room`);
+      }
     };
 
     const handleUserLeft = (user) => {
-      setUsers((prev) => prev.filter((u) => u !== user.username));
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: Date.now() + Math.random().toString(36).substr(2, 9),
-          type: "system",
-          content: `${user.username} left the room`,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-      toast.error(`${user.username} left the room`);
+      setUsers((prev) => prev.filter((u) => {
+        if (typeof u === 'object') {
+          return u.userId !== user.userId;
+        }
+        return u !== user.username;
+      }));
+      if (!isNavigatingFromCodeShareRef.current) {
+        toast.error(`${user.username} left the room`);
+      }
     };
 
     const handleRoomData = ({ messages: roomMessages, users: roomUsers }) => {
-      setMessages(roomMessages);
-      setUsers([...new Set(roomUsers)]);
+      // Merge server messages with local messages instead of replacing
+      setMessages(prevMessages => {
+        // Create a map of existing messages by their unique identifier
+        const existingMessagesMap = new Map();
+        prevMessages.forEach(msg => {
+          const key = msg.id || `${msg.sender}-${msg.text}-${msg.timestamp}`;
+          existingMessagesMap.set(key, msg);
+        });
+        
+        // Add server messages, avoiding duplicates
+        const mergedMessages = [...prevMessages];
+        roomMessages.forEach(serverMsg => {
+          const key = serverMsg.id || `${serverMsg.sender}-${serverMsg.text}-${serverMsg.timestamp}`;
+          if (!existingMessagesMap.has(key)) {
+            mergedMessages.push(serverMsg);
+            existingMessagesMap.set(key, serverMsg);
+          }
+        });
+        
+        // Sort by timestamp to maintain chronological order
+        return mergedMessages.sort((a, b) => 
+          new Date(a.timestamp) - new Date(b.timestamp)
+        );
+      });
+      
+      // Convert users to proper format if they're not already
+      const formattedUsers = roomUsers.map(user => {
+        if (typeof user === 'object' && user.userId) {
+          return user;
+        }
+        return { username: user, userId: null };
+      });
+      setUsers(formattedUsers);
       scrollToBottom();
     };
 
@@ -218,12 +294,17 @@ function Chat() {
     socket.on("user-joined", handleUserJoined);
     socket.on("user-left", handleUserLeft);
     socket.on("room-data", handleRoomData);
+    
+    socketListenersSetRef.current = true;
+    currentRoomRef.current = roomId;
 
     return () => {
       socket.off("receive-message", handleReceiveMessage);
       socket.off("user-joined", handleUserJoined);
       socket.off("user-left", handleUserLeft);
       socket.off("room-data", handleRoomData);
+      socketListenersSetRef.current = false;
+      currentRoomRef.current = null;
     };
   }, [socket, roomId, scrollToBottom]);
 
@@ -232,7 +313,7 @@ function Chat() {
   }, [urlRoomId]);
 
   useEffect(() => {
-    if (roomId && username) {
+    if (roomId && username && messages.length > 0) {
       localStorage.setItem(
         SESSION_KEY,
         JSON.stringify({ username, roomId, userId, messages })
@@ -240,17 +321,52 @@ function Chat() {
     }
   }, [roomId, username, userId, messages]);
 
+  // Save username to localStorage whenever it changes
+  useEffect(() => {
+    if (username) {
+      localStorage.setItem("username", username);
+    }
+  }, [username]);
+
   useEffect(() => {
     const chatRef = ref(rtdb, `chats/${roomId}`);
     const unsubscribe = onValue(chatRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const messagesArray = Object.values(data);
-        setMessages(messagesArray);
-        localStorage.setItem(
-          SESSION_KEY,
-          JSON.stringify({ username, roomId, userId, messages: messagesArray })
-        );
+        
+        // Merge Firebase messages with local messages instead of replacing
+        setMessages(prevMessages => {
+          // Create a map of existing messages by their unique identifier
+          const existingMessagesMap = new Map();
+          prevMessages.forEach(msg => {
+            const key = msg.id || `${msg.sender}-${msg.text}-${msg.timestamp}`;
+            existingMessagesMap.set(key, msg);
+          });
+          
+          // Add Firebase messages, avoiding duplicates
+          const mergedMessages = [...prevMessages];
+          messagesArray.forEach(firebaseMsg => {
+            const key = firebaseMsg.id || `${firebaseMsg.sender}-${firebaseMsg.text}-${firebaseMsg.timestamp}`;
+            if (!existingMessagesMap.has(key)) {
+              mergedMessages.push(firebaseMsg);
+              existingMessagesMap.set(key, firebaseMsg);
+            }
+          });
+          
+          // Sort by timestamp to maintain chronological order
+          const sortedMessages = mergedMessages.sort((a, b) => 
+            new Date(a.timestamp) - new Date(b.timestamp)
+          );
+          
+          // Update localStorage with merged messages
+          localStorage.setItem(
+            SESSION_KEY,
+            JSON.stringify({ username, roomId, userId, messages: sortedMessages })
+          );
+          
+          return sortedMessages;
+        });
       }
     });
 
@@ -261,6 +377,110 @@ function Chat() {
     return () => unsubscribe();
   }, [roomId, userId]);
 
+  // Check if we should auto-rejoin from navigation
+  useEffect(() => {
+    const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+    const shouldRejoin = location.state?.rejoinRoom && savedSession.username && savedSession.roomId;
+    
+    if (shouldRejoin) {
+      // Check if coming from code share
+      const isFromCodeShare = location.state?.prevPath?.includes('/code/');
+      isNavigatingFromCodeShareRef.current = isFromCodeShare;
+      
+      // Only update username if it's completely empty (not during navigation)
+      if (!username) {
+        setUsername(savedSession.username);
+      }
+      setRoomId(savedSession.roomId);
+      setStep("chat");
+      
+      // Restore messages from localStorage first
+      if (savedSession.messages && savedSession.messages.length > 0) {
+        setMessages(savedSession.messages);
+      }
+      
+      // Update session with current username if it's different
+      if (username && username !== savedSession.username) {
+        const updatedSession = { ...savedSession, username };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(updatedSession));
+      }
+      
+      // Clear the navigation state immediately to prevent duplicate triggers
+      navigate(location.pathname, { replace: true, state: {} });
+      
+      // Reset the navigation flag after a short delay
+      setTimeout(() => {
+        isNavigatingFromCodeShareRef.current = false;
+      }, 2000);
+    }
+  }, [location.state, navigate, location.pathname, username]);
+
+  // Consolidated effect to handle room joining (both navigation and URL-based)
+  useEffect(() => {
+    if (!socket || roomJoinedRef.current) return;
+
+    // Determine if we should join a room
+    let targetRoomId = null;
+    let targetUsername = null;
+    let targetUserId = null;
+
+    // Check for URL-based room joining
+    if (urlRoomId && !roomId) {
+      const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+      if (savedSession.username && savedSession.roomId === urlRoomId) {
+        targetRoomId = urlRoomId;
+        targetUsername = username || savedSession.username;
+        targetUserId = savedSession.userId || userId;
+        
+        // Update state
+        if (!username) {
+          setUsername(savedSession.username);
+        }
+        setRoomId(urlRoomId);
+        setStep("chat");
+        
+        // Restore messages
+        if (savedSession.messages && savedSession.messages.length > 0) {
+          setMessages(savedSession.messages);
+        }
+      }
+    }
+    
+    // Check for navigation-based room joining
+    if (!targetRoomId && location.state?.rejoinRoom) {
+      const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
+      if (savedSession.username && savedSession.roomId) {
+        targetRoomId = savedSession.roomId;
+        targetUsername = username || savedSession.username;
+        targetUserId = savedSession.userId || userId;
+      }
+    }
+
+    // Join the room if we have a target
+    if (targetRoomId && targetUsername && targetUserId) {
+      // Only emit join-room once
+      socket.emit("join-room", { 
+        roomId: targetRoomId, 
+        username: targetUsername,
+        userId: targetUserId
+      });
+      
+      // Request room data only once
+      socket.emit("get-room-data", { roomId: targetRoomId });
+      
+      roomJoinedRef.current = true;
+    }
+  }, [socket, urlRoomId, roomId, username, userId, location.state?.rejoinRoom]);
+
+  // Cleanup effect to reset flags when component unmounts
+  useEffect(() => {
+    return () => {
+      roomJoinedRef.current = false;
+      socketListenersSetRef.current = false;
+      currentRoomRef.current = null;
+    };
+  }, []);
+
   const handleJoinRoom = (e) => {
     e.preventDefault();
     const trimmedUsername = username.trim();
@@ -269,12 +489,20 @@ function Chat() {
       return;
     }
 
+    // Save username to localStorage for consistency
+    localStorage.setItem("username", trimmedUsername);
+
     const newRoomId =
       urlRoomId ||
       roomId.trim() ||
       Math.random().toString(36).substr(2, 6).toUpperCase();
 
-    socket.emit("join-room", { roomId: newRoomId, username: trimmedUsername });
+    // Reset flags for clean state
+    roomJoinedRef.current = false;
+    socketListenersSetRef.current = false;
+    currentRoomRef.current = null;
+
+    socket.emit("join-room", { roomId: newRoomId, username: trimmedUsername, userId });
 
     if (!urlRoomId && !roomId) {
       setMessages((prev) => [
@@ -291,8 +519,9 @@ function Chat() {
     setStep("chat");
     navigate(`/chat/${newRoomId}`);
     const savedSession = JSON.parse(localStorage.getItem(SESSION_KEY) || "{}");
-    if (savedSession.roomId === newRoomId)
-      setMessages(savedSession.messages || []);
+    if (savedSession.roomId === newRoomId && savedSession.messages && savedSession.messages.length > 0) {
+      setMessages(savedSession.messages);
+    }
   };
 
   const handleSendMessage = async (e) => {
@@ -376,6 +605,10 @@ function Chat() {
         timestamp: new Date().toISOString(),
       };
 
+      // Add message to local state immediately
+      setMessages((prev) => [...prev, newMessage]);
+      scrollToBottom();
+
       socket.emit("send-message", {
         roomId: roomIdRef.current,
         message: newMessage,
@@ -421,6 +654,7 @@ function Chat() {
     socket.emit("leave-room", {
       roomId: roomIdRef.current,
       username: usernameRef.current,
+      userId: userId
     });
     localStorage.removeItem(SESSION_KEY);
     setStep("join");
@@ -428,11 +662,19 @@ function Chat() {
     setUsername("");
     setUsers([]);
     setMessages([]);
+    roomJoinedRef.current = false;
+    socketListenersSetRef.current = false;
+    currentRoomRef.current = null;
     navigate("/chat");
   };
 
   const handleVideoCall = () => {
     navigate(`/video-call/${roomId}`);
+  };
+
+  const handlePasteCodeToChat = (code) => {
+    setMessage(code);
+    setShowCodeGenerator(false);
   };
 
   useEffect(() => {
@@ -505,6 +747,15 @@ function Chat() {
             <h1 className="text-white text-xl font-bold">
               Chat Room: {roomId}
             </h1>
+            <button
+              onClick={handleLeaveRoom}
+              className="flex items-center px-3 py-1 rounded-lg text-sm font-medium transition-all duration-300 bg-red-500 hover:bg-red-600 text-white border border-red-400"
+            >
+              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Leave
+            </button>
           </div>
           <div className="flex space-x-4">
             <button
@@ -526,12 +777,31 @@ function Chat() {
               </svg>
               Start Video Call
             </button>
+            <button
+              onClick={() => setShowCodeGenerator(true)}
+              className="flex items-center px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 bg-white/20 hover:bg-white/30 text-white border border-white/30"
+            >
+              <svg
+                className="w-5 h-5 mr-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                />
+              </svg>
+              Generate Code
+            </button>
           </div>
         </div>
       </nav>
 
       <div className="flex flex-1 overflow-hidden relative">
-        <RoomSidebar roomId={roomId} users={users} onLeave={handleLeaveRoom} />
+        <RoomSidebar roomId={roomId} users={users} />
         <div className="flex-1 flex flex-col">
           <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gradient-to-b from-gray-50 to-gray-100">
             {messages.map((message) => {
@@ -795,6 +1065,27 @@ function Chat() {
           </form>
         </div>
       </div>
+      {/* Code Generator Modal */}
+      {showCodeGenerator && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-semibold">Generate Code</h3>
+                <button
+                  onClick={() => setShowCodeGenerator(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <CodeGenerator onPasteToChat={handlePasteCodeToChat} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

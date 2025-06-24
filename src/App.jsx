@@ -23,6 +23,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Navbar from "./Navbar";
 import Signup from "./pages/Signup";
 import CodeShare from "./components/CodeShare";
+import CodeGeneratorPage from "./pages/CodeGenerator";
 import { browserSessionPersistence, setPersistence } from "firebase/auth";
 import { auth } from "./firebase";
 
@@ -102,6 +103,7 @@ function App() {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/code-generator" element={<CodeGeneratorPage />} />
         </Route>
         <Route
           path="/chat/:roomId?"

@@ -11,7 +11,7 @@ const io = new Server(server, {
   },
 });
 
-const rooms = new Map(); // roomId -> { messages: [], users: Set<string>, code: { [filename]: string }, aiStatus: {} }
+const rooms = new Map(); // roomId -> { messages: [], users: Map<userId, {username, socketId}>, code: { [filename]: string }, aiStatus: {} }
 
 const PORT = process.env.PORT || 3001;
 
@@ -21,31 +21,42 @@ io.on("connection", (socket) => {
   socket.data = {
     rooms: new Set(),
     username: null,
+    userId: null,
   };
 
-  socket.on("join-room", ({ roomId, username }) => {
+  socket.on("join-room", ({ roomId, username, userId }) => {
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         messages: [],
-        users: new Set(),
+        users: new Map(), // userId -> {username, socketId}
         code: { "main.js": "// Start coding here!\n" },
       });
     }
 
     const room = rooms.get(roomId);
-    room.users.add(username);
+    
+    // Check if user already exists in room
+    const existingUser = Array.from(room.users.values()).find(u => u.username === username);
+    if (existingUser) {
+      // Update the existing user's socket ID
+      room.users.set(existingUser.userId, { username, socketId: socket.id });
+    } else {
+      // Add new user
+      room.users.set(userId, { username, socketId: socket.id });
+    }
 
     socket.data.username = username;
+    socket.data.userId = userId;
     socket.data.rooms.add(roomId);
     socket.join(roomId);
 
     socket.emit("room-data", {
       messages: room.messages,
-      users: Array.from(room.users),
+      users: Array.from(room.users.values()).map(u => ({ username: u.username, userId: Array.from(room.users.keys()).find(key => room.users.get(key) === u) })),
       code: room.code,
     });
 
-    socket.to(roomId).emit("user-joined", { username });
+    socket.to(roomId).emit("user-joined", { username, userId });
   });
 
   socket.on("send-message", ({ roomId, message }) => {
@@ -106,7 +117,7 @@ io.on("connection", (socket) => {
     if (room) {
       socket.emit("room-data", {
         messages: room.messages,
-        users: Array.from(room.users),
+        users: Array.from(room.users.values()).map(u => ({ username: u.username, userId: Array.from(room.users.keys()).find(key => room.users.get(key) === u) })),
         code: room.code,
       });
     }
@@ -164,8 +175,14 @@ io.on("connection", (socket) => {
     socket.data.rooms.forEach((roomId) => {
       const room = rooms.get(roomId);
       if (room) {
-        room.users.delete(socket.data.username);
-        socket.to(roomId).emit("user-left", { username: socket.data.username });
+        // Find and remove the user by socket ID
+        for (const [userId, userData] of room.users.entries()) {
+          if (userData.socketId === socket.id) {
+            room.users.delete(userId);
+            socket.to(roomId).emit("user-left", { username: userData.username, userId });
+            break;
+          }
+        }
         if (room.users.size === 0) {
           rooms.delete(roomId);
         }
@@ -173,10 +190,16 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("leave-room", ({ roomId, username }) => {
+  socket.on("leave-room", ({ roomId, username, userId }) => {
     socket.leave(roomId);
     socket.data.rooms.delete(roomId);
-    socket.to(roomId).emit("user-left", { username });
+    
+    const room = rooms.get(roomId);
+    if (room && userId) {
+      room.users.delete(userId);
+    }
+    
+    socket.to(roomId).emit("user-left", { username, userId });
   });
 });
 

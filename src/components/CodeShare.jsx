@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import Editor from "@monaco-editor/react";
-import io from "socket.io-client";
 import { debounce } from "lodash";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -25,8 +24,8 @@ import RoomSidebar from "./RoomSidebar";
 import toast from "react-hot-toast";
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
+import { useSocket } from "../context/SocketContext";
 
-const SOCKET_URL = "https://collabspace-1.onrender.com";
 const API_KEY = "AIzaSyB5LjHte97UTbIkcGyu-pWvMcdv82HiCwM";
 const AI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
@@ -136,9 +135,10 @@ const ActionButton = ({ icon: Icon, label, onClick, disabled, variant }) => {
 const CodeShare = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [files, setFiles] = useState({ "main.js": "// Start coding here" });
   const [users, setUsers] = useState([]);
-  const [socket, setSocket] = useState(null);
+  const socket = useSocket();
   const [aiPrompt, setAiPrompt] = useState("");
   const [isAILoading, setIsAILoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState("main.js");
@@ -153,25 +153,25 @@ const CodeShare = () => {
   });
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  const handleLeaveRoom = () => {
+    // Navigate back to chat with rejoin state
+    navigate("/chat", {
+      state: { 
+        prevPath: location.pathname,
+        rejoinRoom: true 
+      }
+    });
+  };
+
   useEffect(() => {
-    const newSocket = io(SOCKET_URL, {
-      reconnectionAttempts: 5,
-      query: { roomId, username },
-    });
-    setSocket(newSocket);
+    if (!socket) return;
 
-    newSocket.on("connect", () => {
-      newSocket.emit("join-room", { roomId, username });
-      toast.success("Connected to room");
-    });
+    // Join the room
+    socket.emit("join-room", { roomId, username });
 
-    newSocket.on("connect_error", () => {
-      toast.error("Connection failed");
-      setTimeout(() => navigate("/chat"), 2000);
-    });
-
-    newSocket.on("room-data", ({ users }) => setUsers(users));
-    newSocket.on("code_update", ({ path, content }) => {
+    // Set up event listeners
+    const handleRoomData = ({ users }) => setUsers(users);
+    const handleCodeUpdate = ({ path, content }) => {
       setFiles((prevFiles) => {
         if (content === null) {
           const newFiles = { ...prevFiles };
@@ -181,19 +181,27 @@ const CodeShare = () => {
         if (prevFiles[path] === content) return prevFiles;
         return { ...prevFiles, [path]: content };
       });
-    });
-
-    newSocket.on("cursor_update", ({ userId, position, filePath }) => {
+    };
+    const handleCursorUpdate = ({ userId, position, filePath }) => {
       setCursorPositions((prev) => ({
         ...prev,
         [userId]: { position, filePath },
       }));
-    });
+    };
+    const handleUserList = (users) => setUsers(users);
 
-    newSocket.on("user_list", setUsers);
+    socket.on("room-data", handleRoomData);
+    socket.on("code_update", handleCodeUpdate);
+    socket.on("cursor_update", handleCursorUpdate);
+    socket.on("user_list", handleUserList);
 
-    return () => newSocket.disconnect();
-  }, [roomId, username, navigate]);
+    return () => {
+      socket.off("room-data", handleRoomData);
+      socket.off("code_update", handleCodeUpdate);
+      socket.off("cursor_update", handleCursorUpdate);
+      socket.off("user_list", handleUserList);
+    };
+  }, [socket, roomId, username]);
 
   useEffect(() => {
     const roomDocRef = doc(db, "codeRooms", roomId);
