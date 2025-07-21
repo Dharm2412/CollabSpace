@@ -3,7 +3,7 @@
 
 "✨ CollabSpace: A real-time collaboration app built with the MERN stack, featuring AI-powered tools. Create rooms to chat 💬, use an interactive whiteboard 📋, share and edit code live 👨‍💻, and generate code with AI 🤖. Download your collaborative work anytime ⬇️."
 
-## Demo : https://colllabspace.netlify.app/
+## Demo : [https://colllabspace.netlify.app/](https://taupe-elf-a3ee2f.netlify.app/)
 
 Soon
 ## Screenshots
