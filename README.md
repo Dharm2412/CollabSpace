@@ -8,7 +8,7 @@
 Soon
 ## Screenshots
 
-![Image](https://github.com/user-attachments/assets/498757f4-560d-49ed-9b29-6cba0f3d4554)
+<img width="2940" height="1582" alt="Image" src="https://github.com/user-attachments/assets/4aca06e9-e6d9-42c0-abc9-ba8b169e42b5" />
 
 ![Image](https://github.com/user-attachments/assets/f16ed3a2-c15e-4fa0-bb48-a92bbe1cbf4f)
 
